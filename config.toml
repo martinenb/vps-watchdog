@@ -1,0 +1,44 @@
+[general]
+interval_seconds = 30
+log_dir = "/var/log/watchdog"
+db_path = "/var/lib/watchdog/metrics.db"
+top_processes_n = 10
+
+[thresholds]
+ram_pct = 85.0
+cpu_pct = 90.0
+cpu_sustained_minutes = 5
+disk_pct = 90.0
+disk_alert_cooldown_hours = 6
+ram_alert_cooldown_minutes = 60
+cpu_alert_cooldown_minutes = 30
+
+[docker]
+idle_cpu_pct = 0.5
+idle_duration_minutes = 10
+auto_stop = true
+stop_order = []
+
+[brevo]
+api_key = "YOUR_BREVO_API_KEY"
+sender_email = "watchdog@yourdomain.com"
+sender_name = "VPS Watchdog"
+
+[recipients]
+emails = ["you@example.com"]
+
+[weekly]
+hour_utc = 8
+include_graphs = true
+weeks_comparison = 4
+
+[disk_walk]
+paths = ["/", "/home", "/var"]
+max_depth = 4
+top_dirs_n = 15
+
+[web]
+port = 47832
+username = "admin"
+password = "changeme"
+enabled = true

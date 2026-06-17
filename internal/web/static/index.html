@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VPS Watchdog</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header class="header">
+  <div class="header-left">
+    <div class="logo">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+      </svg>
+      VPS Watchdog
+    </div>
+    <div class="header-info">
+      <span class="hostname" id="hostname">Loading...</span>
+      <span class="current-time" id="current-time"></span>
+    </div>
+  </div>
+  <div class="flex-row">
+    <span id="sse-status" class="status-dot" title="SSE connection status"></span>
+    <span class="text-muted" id="sse-label">Connecting...</span>
+  </div>
+</header>
+
+<div class="main">
+
+  <!-- Tabs -->
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
+    <button class="tab-btn" data-tab="graphs">Graphs</button>
+    <button class="tab-btn" data-tab="actions">Actions</button>
+    <button class="tab-btn" data-tab="config">Config</button>
+    <button class="tab-btn" data-tab="logs">Logs</button>
+  </div>
+
+  <!-- Dashboard Tab -->
+  <div id="tab-dashboard" class="tab-panel active">
+
+    <!-- Metric Cards -->
+    <div class="metrics-grid">
+      <div class="metric-card">
+        <div class="metric-label">RAM Usage</div>
+        <div class="metric-value neutral" id="m-ram">—</div>
+        <div class="progress-bar"><div class="progress-fill ok" id="pb-ram" style="width:0%"></div></div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">CPU Usage</div>
+        <div class="metric-value neutral" id="m-cpu">—</div>
+        <div class="progress-bar"><div class="progress-fill ok" id="pb-cpu" style="width:0%"></div></div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Disk (root)</div>
+        <div class="metric-value neutral" id="m-disk">—</div>
+        <div class="progress-bar"><div class="progress-fill ok" id="pb-disk" style="width:0%"></div></div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Swap Usage</div>
+        <div class="metric-value neutral" id="m-swap">—</div>
+        <div class="progress-bar"><div class="progress-fill ok" id="pb-swap" style="width:0%"></div></div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Load (1m)</div>
+        <div class="metric-value neutral" id="m-load1">—</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Load (5m)</div>
+        <div class="metric-value neutral" id="m-load5">—</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Net Recv</div>
+        <div class="metric-value neutral" id="m-recv">—</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Net Sent</div>
+        <div class="metric-value neutral" id="m-sent">—</div>
+      </div>
+    </div>
+
+    <!-- Sparklines -->
+    <div class="sparklines">
+      <div class="sparkline-card">
+        <div class="sparkline-header">
+          <span class="sparkline-title">RAM (last 60 points)</span>
+          <span class="sparkline-current" id="sparkline-ram-val">—</span>
+        </div>
+        <canvas id="sparkline-ram" height="80"></canvas>
+      </div>
+      <div class="sparkline-card">
+        <div class="sparkline-header">
+          <span class="sparkline-title">CPU (last 60 points)</span>
+          <span class="sparkline-current" id="sparkline-cpu-val">—</span>
+        </div>
+        <canvas id="sparkline-cpu" height="80"></canvas>
+      </div>
+    </div>
+
+    <!-- Docker Containers -->
+    <div class="section-title">
+      Docker Containers
+      <button class="btn" onclick="refreshDocker()">Refresh</button>
+    </div>
+    <div id="docker-grid" class="docker-grid">
+      <div class="no-data">Loading containers...</div>
+    </div>
+  </div>
+
+  <!-- Graphs Tab -->
+  <div id="tab-graphs" class="tab-panel">
+    <div class="flex-row mb-16">
+      <span class="section-title" style="margin-bottom:0">Charts (Last 7 Days)</span>
+      <button class="btn btn-primary" onclick="refreshGraphs()">Refresh All</button>
+      <button class="btn" onclick="App.scheduler.SendWeeklyReport && testReport()">Send Test Report</button>
+    </div>
+    <div class="graphs-grid">
+      <div class="graph-card">
+        <div class="graph-card-title">RAM Usage</div>
+        <div id="graph-ram" class="graph-placeholder"><span class="spinner"></span>Loading...</div>
+      </div>
+      <div class="graph-card">
+        <div class="graph-card-title">CPU Usage</div>
+        <div id="graph-cpu" class="graph-placeholder"><span class="spinner"></span>Loading...</div>
+      </div>
+      <div class="graph-card">
+        <div class="graph-card-title">Disk Usage</div>
+        <div id="graph-disk" class="graph-placeholder"><span class="spinner"></span>Loading...</div>
+      </div>
+      <div class="graph-card">
+        <div class="graph-card-title">Network Traffic</div>
+        <div id="graph-network" class="graph-placeholder"><span class="spinner"></span>Loading...</div>
+      </div>
+      <div class="graph-card">
+        <div class="graph-card-title">Docker Memory</div>
+        <div id="graph-docker" class="graph-placeholder"><span class="spinner"></span>Loading...</div>
+      </div>
+      <div class="graph-card">
+        <div class="graph-card-title">Weekly Comparison</div>
+        <div id="graph-weekly" class="graph-placeholder"><span class="spinner"></span>Loading...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Actions Tab -->
+  <div id="tab-actions" class="tab-panel">
+    <div class="flex-row mb-16">
+      <span class="section-title" style="margin-bottom:0">Automated Actions</span>
+      <button class="btn" onclick="refreshActions()">Refresh</button>
+    </div>
+    <div class="card actions-table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Type</th>
+            <th>Trigger</th>
+            <th>Details</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="actions-tbody">
+          <tr><td colspan="5" class="no-data">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Config Tab -->
+  <div id="tab-config" class="tab-panel">
+    <div class="flex-row mb-16">
+      <span class="section-title" style="margin-bottom:0">Configuration</span>
+    </div>
+
+    <div class="card config-form">
+      <form id="config-form" onsubmit="saveConfig(event)">
+
+        <div class="form-section">
+          <div class="form-section-title">Thresholds</div>
+          <div class="form-row">
+            <label class="form-label">RAM Alert (%)</label>
+            <input type="number" class="form-input" id="cfg-ram-pct" min="50" max="99" step="0.5">
+          </div>
+          <div class="form-row">
+            <label class="form-label">CPU Alert (%)</label>
+            <input type="number" class="form-input" id="cfg-cpu-pct" min="50" max="99" step="0.5">
+          </div>
+          <div class="form-row">
+            <label class="form-label">CPU Sustained (minutes)</label>
+            <input type="number" class="form-input" id="cfg-cpu-sustained" min="1" max="60">
+          </div>
+          <div class="form-row">
+            <label class="form-label">Disk Alert (%)</label>
+            <input type="number" class="form-input" id="cfg-disk-pct" min="50" max="99" step="0.5">
+          </div>
+          <div class="form-row">
+            <label class="form-label">RAM Cooldown (minutes)</label>
+            <input type="number" class="form-input" id="cfg-ram-cooldown" min="1" max="1440">
+          </div>
+          <div class="form-row">
+            <label class="form-label">CPU Cooldown (minutes)</label>
+            <input type="number" class="form-input" id="cfg-cpu-cooldown" min="1" max="1440">
+          </div>
+          <div class="form-row">
+            <label class="form-label">Disk Cooldown (hours)</label>
+            <input type="number" class="form-input" id="cfg-disk-cooldown" min="1" max="168">
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="form-section-title">Docker</div>
+          <div class="form-row">
+            <label class="form-label">Auto-Stop Idle Containers</label>
+            <input type="checkbox" class="form-checkbox" id="cfg-auto-stop">
+          </div>
+          <div class="form-row">
+            <label class="form-label">Idle CPU Threshold (%)</label>
+            <input type="number" class="form-input" id="cfg-idle-cpu" min="0.1" max="10" step="0.1">
+          </div>
+          <div class="form-row">
+            <label class="form-label">Idle Duration (minutes)</label>
+            <input type="number" class="form-input" id="cfg-idle-dur" min="1" max="60">
+          </div>
+        </div>
+
+        <div class="form-row mt-16">
+          <button type="submit" class="btn btn-primary">Save Configuration</button>
+          <button type="button" class="btn" onclick="loadConfig()">Reset</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- Docker Stop Order -->
+    <div class="card mt-16">
+      <div class="form-section-title" style="margin-bottom:12px">Docker Stop Order (drag to reorder)</div>
+      <p class="text-muted mb-16">Containers are stopped in this order when RAM is critical. Drag to change priority.</p>
+      <ul id="stop-order-list" class="stop-order-list">
+        <li class="stop-order-empty">No containers in stop order. Add containers below.</li>
+      </ul>
+      <div class="flex-row mt-16">
+        <input type="text" class="form-input" id="new-container-name" placeholder="container-name" style="width:200px">
+        <button class="btn btn-success" onclick="addToStopOrder()">Add</button>
+        <button class="btn btn-primary" onclick="saveStopOrder()">Save Order</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Logs Tab -->
+  <div id="tab-logs" class="tab-panel">
+    <div class="logs-toolbar">
+      <span class="section-title" style="margin-bottom:0">Log Output</span>
+      <div class="flex-row">
+        <label class="text-muted">Lines:</label>
+        <input type="number" class="form-input" id="log-lines" value="200" min="10" max="5000" style="width:80px">
+        <button class="btn" onclick="refreshLogs()">Refresh</button>
+        <label class="text-muted">
+          <input type="checkbox" id="log-autoscroll" checked> Auto-scroll
+        </label>
+      </div>
+    </div>
+    <div class="logs-container" id="logs-container">
+      <div class="log-line text-muted">Loading logs...</div>
+    </div>
+  </div>
+
+</div><!-- .main -->
+
+<script src="/static/app.js"></script>
+</body>
+</html>

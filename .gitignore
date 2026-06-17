@@ -1,0 +1,5 @@
+*.db
+*.log
+/vps-watchdog
+/tmp/
+*.test

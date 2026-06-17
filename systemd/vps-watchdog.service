@@ -1,0 +1,18 @@
+[Unit]
+Description=VPS Watchdog Monitoring Daemon
+After=network.target docker.service
+Wants=docker.service
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/vps-watchdog --config /etc/watchdog/config.toml
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=vps-watchdog
+
+[Install]
+WantedBy=multi-user.target
