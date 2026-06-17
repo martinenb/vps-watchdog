@@ -15,10 +15,8 @@ import (
 const brevoAPIURL = "https://api.brevo.com/v3/smtp/email"
 
 // BrevoClient sends emails via the Brevo transactional email API.
-type BrevoClient struct {
-	cfg        *config.BrevoConfig
-	recipients []string
-}
+// It reads config on every Send() call so that config reloads are reflected immediately.
+type BrevoClient struct{}
 
 // Attachment represents an email attachment (e.g., a PNG chart).
 type Attachment struct {
@@ -26,18 +24,26 @@ type Attachment struct {
 	Content []byte // raw bytes — will be base64-encoded before sending
 }
 
-// New creates a BrevoClient from the global config.
-func New(cfg *config.Config) *BrevoClient {
-	return &BrevoClient{
-		cfg:        &cfg.Brevo,
-		recipients: cfg.Recipients.Emails,
-	}
+// New creates a BrevoClient.
+func New(_ *config.Config) *BrevoClient {
+	return &BrevoClient{}
 }
 
 // Send sends an HTML email with optional attachments.
+// It reads the current config on each call, so API key changes take effect immediately.
 func (c *BrevoClient) Send(subject, htmlBody string, attachments []Attachment) error {
-	if c.cfg.APIKey == "" || c.cfg.APIKey == "YOUR_BREVO_API_KEY" {
+	cfg := config.Get()
+	apiKey := cfg.Brevo.APIKey
+	senderEmail := cfg.Brevo.SenderEmail
+	senderName := cfg.Brevo.SenderName
+	recipients := cfg.Recipients.Emails
+
+	if apiKey == "" || apiKey == "YOUR_BREVO_API_KEY" {
 		log.Printf("brevo: API key not configured, skipping email: %s", subject)
+		return nil
+	}
+	if len(recipients) == 0 {
+		log.Printf("brevo: no recipients configured, skipping email: %s", subject)
 		return nil
 	}
 
@@ -53,8 +59,8 @@ func (c *BrevoClient) Send(subject, htmlBody string, attachments []Attachment) e
 		Content string `json:"content"` // base64
 	}
 
-	to := make([]recipient, 0, len(c.recipients))
-	for _, email := range c.recipients {
+	to := make([]recipient, 0, len(recipients))
+	for _, email := range recipients {
 		to = append(to, recipient{Email: email})
 	}
 
@@ -67,7 +73,7 @@ func (c *BrevoClient) Send(subject, htmlBody string, attachments []Attachment) e
 	}
 
 	payload := map[string]interface{}{
-		"sender":      sender{Name: c.cfg.SenderName, Email: c.cfg.SenderEmail},
+		"sender":      sender{Name: senderName, Email: senderEmail},
 		"to":          to,
 		"subject":     subject,
 		"htmlContent": htmlBody,
@@ -86,7 +92,7 @@ func (c *BrevoClient) Send(subject, htmlBody string, attachments []Attachment) e
 		return fmt.Errorf("brevo: create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("api-key", c.cfg.APIKey)
+	req.Header.Set("api-key", apiKey)
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := http.DefaultClient.Do(req)
@@ -100,7 +106,7 @@ func (c *BrevoClient) Send(subject, htmlBody string, attachments []Attachment) e
 		return fmt.Errorf("brevo: unexpected status %d: %s", resp.StatusCode, string(respBody))
 	}
 
-	log.Printf("brevo: email sent successfully: %s (recipients: %v)", subject, c.recipients)
+	log.Printf("brevo: email sent successfully: %s (recipients: %v)", subject, recipients)
 	return nil
 }
 

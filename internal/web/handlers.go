@@ -2,13 +2,16 @@ package web
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -16,6 +19,7 @@ import (
 	"github.com/BurntSushi/toml"
 
 	actionpkg "vps-watchdog/internal/action"
+	"vps-watchdog/internal/collector"
 	"vps-watchdog/internal/config"
 )
 
@@ -166,14 +170,64 @@ func (s *Server) handleMetricsLatest(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(latest)
 }
 
-// handleDockerList returns current Docker container metrics.
+// handleDockerList returns current Docker container metrics with real-time status.
 func (s *Server) handleDockerList(w http.ResponseWriter, r *http.Request) {
+	// Get real-time status from docker ps --all
+	type psLine struct {
+		Names  string `json:"Names"`
+		Status string `json:"Status"`
+		State  string `json:"State"`
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "docker", "ps", "--all", "--format", "{{json .}}").Output()
+
+	liveStatus := map[string]string{} // name -> "running" or "stopped"
+	if err == nil {
+		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			if line == "" {
+				continue
+			}
+			var ps psLine
+			if json.Unmarshal([]byte(line), &ps) == nil {
+				st := "stopped"
+				if strings.HasPrefix(strings.ToLower(ps.Status), "up") || ps.State == "running" {
+					st = "running"
+				}
+				liveStatus[ps.Names] = st
+			}
+		}
+	}
+
+	// Get metrics from DB
 	containers, err := s.db.QueryDockerMetrics()
 	if err != nil {
 		log.Printf("web: QueryDockerMetrics: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+
+	// Merge: override status with live data
+	for i := range containers {
+		if st, ok := liveStatus[containers[i].Name]; ok {
+			containers[i].Status = st
+		}
+	}
+
+	// Also add containers that exist in docker ps but have no DB metrics yet
+	dbNames := map[string]bool{}
+	for _, c := range containers {
+		dbNames[c.Name] = true
+	}
+	for name, st := range liveStatus {
+		if !dbNames[name] {
+			containers = append(containers, collector.DockerMetric{Name: name, Status: st})
+		}
+	}
+
+	// Sort by name
+	sort.Slice(containers, func(i, j int) bool { return containers[i].Name < containers[j].Name })
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(containers)
 }

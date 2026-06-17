@@ -104,8 +104,10 @@ func (d *DockerCollector) Collect() ([]Metric, error) {
 		memBytes := parseMemUsage(s.MemUsage)
 
 		status := statuses[s.Name]
-		if status == "" {
+		if strings.HasPrefix(strings.ToLower(status), "up") || status == "" {
 			status = "running"
+		} else {
+			status = "stopped"
 		}
 
 		tags := map[string]string{"container": s.Name, "status": status}

@@ -4,8 +4,8 @@
 // Chart.js global defaults (dark theme)
 // ============================================================
 if (typeof Chart !== 'undefined') {
-  Chart.defaults.color = '#c9d1d9';
-  Chart.defaults.borderColor = '#30363d';
+  Chart.defaults.color = '#8892a4';
+  Chart.defaults.borderColor = '#2d3142';
 }
 
 // ============================================================
@@ -17,11 +17,9 @@ class Sparkline {
     this.ctx = canvas.getContext('2d');
     this.data = [];
     this.maxPoints = opts.maxPoints || 60;
-    this.color = opts.color || '#58a6ff';
-    this.fillColor = opts.fillColor || 'rgba(88,166,255,0.15)';
+    this.color = opts.color || '#6366f1';
+    this.fillColor = opts.fillColor || 'rgba(99,102,241,0.12)';
     this.max = opts.max || 100;
-    this.thresholdColor = opts.thresholdColor || '#f85149';
-    this.threshold = opts.threshold || null;
     this._resizeObserver = new ResizeObserver(() => this._resize());
     this._resizeObserver.observe(canvas.parentElement);
     this._resize();
@@ -30,7 +28,7 @@ class Sparkline {
   _resize() {
     const parent = this.canvas.parentElement;
     this.canvas.width = parent.clientWidth;
-    this.canvas.height = 80;
+    this.canvas.height = 48;
     this._draw();
   }
 
@@ -47,24 +45,13 @@ class Sparkline {
     ctx.clearRect(0, 0, w, h);
     if (this.data.length < 2) return;
     const maxVal = this.max || Math.max(...this.data, 1);
-    const padTop = 6, padBottom = 4;
+    const padTop = 4, padBottom = 2;
     const drawH = h - padTop - padBottom;
     const xStep = w / (this.maxPoints - 1);
     const xOffset = (this.maxPoints - this.data.length) * xStep;
     const toX = (i) => xOffset + i * xStep;
     const toY = (v) => padTop + drawH - (v / maxVal) * drawH;
 
-    if (this.threshold !== null) {
-      const ty = toY(this.threshold);
-      ctx.beginPath();
-      ctx.setLineDash([4, 3]);
-      ctx.strokeStyle = this.thresholdColor;
-      ctx.lineWidth = 1;
-      ctx.moveTo(0, ty);
-      ctx.lineTo(w, ty);
-      ctx.stroke();
-      ctx.setLineDash([]);
-    }
     ctx.beginPath();
     ctx.moveTo(toX(0), toY(this.data[0]));
     for (let i = 1; i < this.data.length; i++) ctx.lineTo(toX(i), toY(this.data[i]));
@@ -73,19 +60,14 @@ class Sparkline {
     ctx.closePath();
     ctx.fillStyle = this.fillColor;
     ctx.fill();
+
     ctx.beginPath();
     ctx.moveTo(toX(0), toY(this.data[0]));
     for (let i = 1; i < this.data.length; i++) ctx.lineTo(toX(i), toY(this.data[i]));
     ctx.strokeStyle = this.color;
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 1.5;
     ctx.lineJoin = 'round';
     ctx.stroke();
-    const lx = toX(this.data.length - 1);
-    const ly = toY(this.data[this.data.length - 1]);
-    ctx.beginPath();
-    ctx.arc(lx, ly, 3, 0, Math.PI * 2);
-    ctx.fillStyle = this.color;
-    ctx.fill();
   }
 }
 
@@ -97,11 +79,8 @@ function showToast(message, type = 'success', duration = 3000) {
   const toast = document.createElement('div');
   toast.className = `toast ${type}`;
   toast.textContent = message;
-  if (container) {
-    container.appendChild(toast);
-  } else {
-    document.body.appendChild(toast);
-  }
+  if (container) container.appendChild(toast);
+  else document.body.appendChild(toast);
   setTimeout(() => {
     toast.style.animation = 'slideIn 0.2s ease reverse';
     setTimeout(() => toast.remove(), 200);
@@ -124,8 +103,8 @@ function fmtPct(v) {
 function formatBytes(bytes) {
   if (!bytes && bytes !== 0) return '—';
   if (bytes >= 1073741824) return (bytes / 1073741824).toFixed(2) + ' GB';
-  if (bytes >= 1048576) return (bytes / 1048576).toFixed(1) + ' MB';
-  if (bytes >= 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  if (bytes >= 1048576)    return (bytes / 1048576).toFixed(1) + ' MB';
+  if (bytes >= 1024)       return (bytes / 1024).toFixed(1) + ' KB';
   return bytes + ' B';
 }
 
@@ -134,7 +113,7 @@ function fmtLoad(v) {
 }
 
 function formatDate(unix_ts) {
-  return new Date(unix_ts * 1000).toLocaleString();
+  return new Date(unix_ts * 1000).toLocaleString('fr-FR');
 }
 
 function p95(arr) {
@@ -145,7 +124,15 @@ function p95(arr) {
 }
 
 function escapeHtml(str) {
-  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  return String(str)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+async function fetchJSON(url) {
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error('HTTP ' + resp.status);
+  return resp.json();
 }
 
 function updateMetricCard(id, val, pbId, warnT = 70, critT = 85) {
@@ -183,10 +170,10 @@ function togglePassword(inputId, btn) {
   if (!input) return;
   if (input.type === 'password') {
     input.type = 'text';
-    btn.textContent = '🙈';
+    btn.textContent = 'Masquer';
   } else {
     input.type = 'password';
-    btn.textContent = '👁';
+    btn.textContent = 'Voir';
   }
 }
 
@@ -219,7 +206,7 @@ function connectSSE() {
     const dot = document.getElementById('sse-status');
     const label = document.getElementById('sse-label');
     if (dot) dot.style.background = 'var(--red)';
-    if (label) label.textContent = 'Reconnecting...';
+    if (label) label.textContent = 'Reconnexion...';
     setTimeout(connectSSE, sseBackoff);
     sseBackoff = Math.min(sseBackoff * 2, sseMaxBackoff);
   };
@@ -232,30 +219,20 @@ let ramSparkline = null;
 let cpuSparkline = null;
 
 function initSparklines() {
-  ramSparkline = new Sparkline(document.getElementById('sparkline-ram'), {
-    color: '#58a6ff', fillColor: 'rgba(88,166,255,0.15)', max: 100, threshold: null,
-  });
-  cpuSparkline = new Sparkline(document.getElementById('sparkline-cpu'), {
-    color: '#3fb950', fillColor: 'rgba(63,185,80,0.15)', max: 100, threshold: null,
-  });
+  const ramCanvas = document.getElementById('sparkline-ram');
+  const cpuCanvas = document.getElementById('sparkline-cpu');
+  if (ramCanvas) ramSparkline = new Sparkline(ramCanvas, { color: '#6366f1', fillColor: 'rgba(99,102,241,0.12)', max: 100 });
+  if (cpuCanvas) cpuSparkline = new Sparkline(cpuCanvas, { color: '#22c55e', fillColor: 'rgba(34,197,94,0.12)', max: 100 });
 }
 
 function handleSSEMessage(data) {
   if (data.ram_pct !== undefined) {
     updateMetricCard('m-ram', data.ram_pct, 'pb-ram', 70, 85);
-    if (ramSparkline) {
-      ramSparkline.push(data.ram_pct);
-      const el = document.getElementById('sparkline-ram-val');
-      if (el) { el.textContent = fmtPct(data.ram_pct); el.className = 'sparkline-current ' + colorClass(data.ram_pct); }
-    }
+    if (ramSparkline) ramSparkline.push(data.ram_pct);
   }
   if (data.cpu_pct !== undefined) {
     updateMetricCard('m-cpu', data.cpu_pct, 'pb-cpu', 60, 85);
-    if (cpuSparkline) {
-      cpuSparkline.push(data.cpu_pct);
-      const el = document.getElementById('sparkline-cpu-val');
-      if (el) { el.textContent = fmtPct(data.cpu_pct); el.className = 'sparkline-current ' + colorClass(data.cpu_pct, 60, 85); }
-    }
+    if (cpuSparkline) cpuSparkline.push(data.cpu_pct);
   }
   if (data.disk_pct !== undefined) updateMetricCard('m-disk', data.disk_pct, 'pb-disk', 70, 85);
   if (data.swap_pct !== undefined) updateMetricCard('m-swap', data.swap_pct, 'pb-swap', 50, 80);
@@ -263,100 +240,228 @@ function handleSSEMessage(data) {
   if (data.load_5 !== undefined) { const el = document.getElementById('m-load5'); if (el) el.textContent = fmtLoad(data.load_5); }
   if (data.net_recv_kb !== undefined) { const el = document.getElementById('m-recv'); if (el) el.textContent = data.net_recv_kb.toFixed(1) + ' KB/s'; }
   if (data.net_sent_kb !== undefined) { const el = document.getElementById('m-sent'); if (el) el.textContent = data.net_sent_kb.toFixed(1) + ' KB/s'; }
-  if (data.docker && Array.isArray(data.docker)) renderDockerCards(data.docker);
+
+  // SSE docker data: only update CPU/MEM in table rows, never touch status
+  if (data.docker && Array.isArray(data.docker)) {
+    updateDockerTableMetrics(data.docker);
+  }
 }
 
 // ============================================================
-// Docker container management
+// Docker Tab — table-based, with real-time status
 // ============================================================
-function renderDockerCards(containers) {
-  const grid = document.getElementById('docker-grid');
-  if (!grid) return;
-  if (!containers || containers.length === 0) {
-    grid.innerHTML = '<div class="no-data">No Docker containers found.</div>';
+let allDockerContainers = [];
+let dockerRefreshTimer = null;
+
+async function loadDockerTab() {
+  try {
+    const containers = await fetchJSON('/api/docker');
+    allDockerContainers = containers || [];
+    // Sort: running first, then alphabetically
+    allDockerContainers.sort((a, b) => {
+      const ar = (a.Status === 'running') ? 0 : 1;
+      const br = (b.Status === 'running') ? 0 : 1;
+      if (ar !== br) return ar - br;
+      return (a.Name || '').localeCompare(b.Name || '');
+    });
+    const query = document.getElementById('docker-search')?.value || '';
+    renderDockerTable(allDockerContainers, query);
+    // Update dashboard docker count
+    const runCount = allDockerContainers.filter(c => c.Status === 'running').length;
+    const el = document.getElementById('m-docker-count');
+    if (el) el.textContent = runCount + ' actif' + (runCount !== 1 ? 's' : '');
+    // Update timestamp
+    const upd = document.getElementById('docker-updated');
+    if (upd) upd.textContent = 'Mis a jour : ' + new Date().toLocaleTimeString('fr-FR');
+  } catch (e) {
+    showToast('Erreur chargement Docker : ' + e.message, 'error');
+  }
+}
+
+function renderDockerTable(containers, filterQuery) {
+  const tbody = document.getElementById('docker-tbody');
+  if (!tbody) return;
+
+  const q = (filterQuery || '').toLowerCase();
+  const filtered = q
+    ? containers.filter(c => (c.Name || '').toLowerCase().includes(q))
+    : containers;
+
+  if (!filtered || filtered.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" class="no-data">Aucun conteneur trouvé.</td></tr>';
     return;
   }
-  grid.innerHTML = containers.map(c => {
-    const statusText = c.Status || 'unknown';
-    const statusBadge = statusText.toLowerCase().startsWith('up')
-      ? `<span class="status-badge running">running</span>`
-      : `<span class="status-badge stopped">stopped</span>`;
-    const cpuColor = colorClass(c.CPUPct || c.cpu_pct || 0, 50, 80);
-    const memColor = colorClass(c.MemPct || c.mem_pct || 0, 60, 80);
-    const isRunning = statusText.toLowerCase().startsWith('up');
-    const name = c.Name || c.name || '?';
-    const cpuVal = c.CPUPct !== undefined ? c.CPUPct : (c.cpu_pct || 0);
-    const memPctVal = c.MemPct !== undefined ? c.MemPct : (c.mem_pct || 0);
-    const memMBVal = c.MemMB !== undefined ? c.MemMB : (c.mem_mb || 0);
-    return `<div class="docker-card" id="docker-${name}">
-      <div class="docker-name"><span>${name}</span>${statusBadge}</div>
-      <div class="docker-stats">
-        <div class="docker-stat"><span class="docker-stat-label">CPU</span><span class="docker-stat-value ${cpuColor}">${fmtPct(cpuVal)}</span></div>
-        <div class="docker-stat"><span class="docker-stat-label">MEM</span><span class="docker-stat-value ${memColor}">${fmtPct(memPctVal)}</span></div>
-        <div class="docker-stat"><span class="docker-stat-label">MEM MB</span><span class="docker-stat-value">${memMBVal.toFixed(0)} MB</span></div>
-      </div>
-      <div class="docker-actions">
+
+  tbody.innerHTML = filtered.map(c => {
+    const name = c.Name || '?';
+    const status = c.Status || 'stopped';
+    const isRunning = status === 'running';
+    const cpuVal = c.CPUPct || 0;
+    const memPctVal = c.MemPct || 0;
+    const memMB = c.MemMB || 0;
+    const cpuCls = colorClass(cpuVal, 50, 80);
+    const memCls = colorClass(memPctVal, 60, 80);
+
+    return `<tr id="docker-row-${escapeHtml(name)}">
+      <td class="docker-name-cell">${escapeHtml(name)}</td>
+      <td><span class="status-badge ${status}">${status}</span></td>
+      <td class="docker-cpu-cell ${cpuCls}" data-docker-name="${escapeHtml(name)}" data-field="cpu">
+        ${isRunning ? fmtPct(cpuVal) : '—'}
+      </td>
+      <td class="docker-mem-cell ${memCls}" data-docker-name="${escapeHtml(name)}" data-field="mem_pct">
+        ${isRunning ? fmtPct(memPctVal) : '—'}
+      </td>
+      <td data-docker-name="${escapeHtml(name)}" data-field="mem_mb">
+        ${isRunning ? formatBytes(memMB * 1048576) : '—'}
+      </td>
+      <td>
         ${isRunning
-          ? `<button class="btn btn-danger" onclick="dockerAction('${name}','stop')">Stop</button>`
-          : `<button class="btn btn-success" onclick="dockerAction('${name}','start')">Start</button>`}
-      </div>
-    </div>`;
+          ? `<button class="btn btn-danger" onclick="dockerAction('${escapeHtml(name)}','stop')">Arreter</button>`
+          : `<button class="btn btn-success" onclick="dockerAction('${escapeHtml(name)}','start')">Demarrer</button>`}
+      </td>
+    </tr>`;
   }).join('');
 }
 
-async function refreshDocker() {
-  try {
-    const resp = await fetch('/api/docker');
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    renderDockerCards(await resp.json());
-  } catch (e) {
-    showToast('Failed to refresh Docker: ' + e.message, 'error');
+// Called by SSE: only update CPU/MEM cells, never status
+function updateDockerTableMetrics(containers) {
+  for (const c of containers) {
+    const name = c.Name || c.name || '';
+    if (!name) continue;
+    const cpuVal = c.CPUPct !== undefined ? c.CPUPct : (c.cpu_pct || 0);
+    const memPctVal = c.MemPct !== undefined ? c.MemPct : (c.mem_pct || 0);
+    const memMB = c.MemMB !== undefined ? c.MemMB : (c.mem_mb || 0);
+
+    const cpuCell = document.querySelector(`td[data-docker-name="${CSS.escape(name)}"][data-field="cpu"]`);
+    const memPctCell = document.querySelector(`td[data-docker-name="${CSS.escape(name)}"][data-field="mem_pct"]`);
+    const memMBCell = document.querySelector(`td[data-docker-name="${CSS.escape(name)}"][data-field="mem_mb"]`);
+
+    if (cpuCell) {
+      cpuCell.textContent = fmtPct(cpuVal);
+      cpuCell.className = `docker-cpu-cell ${colorClass(cpuVal, 50, 80)}`;
+    }
+    if (memPctCell) {
+      memPctCell.textContent = fmtPct(memPctVal);
+      memPctCell.className = `docker-mem-cell ${colorClass(memPctVal, 60, 80)}`;
+    }
+    if (memMBCell) {
+      memMBCell.textContent = formatBytes(memMB * 1048576);
+    }
   }
+}
+
+function filterDockers(query) {
+  renderDockerTable(allDockerContainers, query);
 }
 
 async function dockerAction(name, action) {
   try {
     const resp = await fetch(`/api/docker/${name}/${action}`, { method: 'POST' });
     if (!resp.ok) throw new Error((await resp.text()) || 'HTTP ' + resp.status);
-    showToast(`Container "${name}" ${action === 'stop' ? 'arrêté' : 'démarré'}.`);
-    setTimeout(refreshDocker, 1500);
+    showToast(`Conteneur "${name}" ${action === 'stop' ? 'arrete' : 'demarre'}.`);
+    setTimeout(loadDockerTab, 1500);
   } catch (e) {
     showToast(`Erreur ${action} "${name}": ` + e.message, 'error');
   }
 }
 
+// Legacy: used from dashboard refresh (kept for compatibility)
+async function refreshDocker() {
+  return loadDockerTab();
+}
+
 // ============================================================
-// Données tab — metric data browser
+// Metric selector — grouped with friendly names
+// ============================================================
+function friendlyMetricName(name) {
+  const map = {
+    'ram.used_pct':         'RAM utilisee %',
+    'ram.used_bytes':       'RAM utilisee (octets)',
+    'ram.total_bytes':      'RAM totale',
+    'ram.available_bytes':  'RAM disponible',
+    'cpu.total':            'CPU total %',
+    'cpu.load_1':           'Charge CPU 1 min',
+    'cpu.load_5':           'Charge CPU 5 min',
+    'cpu.load_15':          'Charge CPU 15 min',
+    'system.swap_pct':      'Swap utilise %',
+    'system.swap_used_bytes':'Swap utilise (octets)',
+    'system.open_fds':      'Fichiers ouverts',
+    'net.bytes_sent_delta': 'Reseau envoye (delta)',
+    'net.bytes_recv_delta': 'Reseau recu (delta)',
+    'net.connections':      'Connexions ouvertes',
+  };
+  if (map[name]) return map[name];
+  if (name.match(/^cpu\.core\.\d+$/)) return `CPU Coeur ${name.split('.')[2]}`;
+  if (name.match(/^disk\..+\.used_pct$/))   return `Disque ${name.split('.')[1]} utilise %`;
+  if (name.match(/^disk\..+\.free_bytes$/)) return `Disque ${name.split('.')[1]} libre`;
+  if (name.match(/^disk\..+\.total_bytes$/))return `Disque ${name.split('.')[1]} total`;
+  if (name.match(/^docker\..+\.cpu_pct$/))  return `Docker ${name.split('.')[1]} — CPU %`;
+  if (name.match(/^docker\..+\.mem_pct$/))  return `Docker ${name.split('.')[1]} — Mem %`;
+  if (name.match(/^docker\..+\.mem_bytes$/))return `Docker ${name.split('.')[1]} — Mem octets`;
+  if (name.match(/^ram\.proc\.\d+$/))       return `Process RAM (PID ${name.split('.')[2]})`;
+  return name;
+}
+
+async function loadMetricNames() {
+  const sel = document.getElementById('metric-select');
+  if (!sel) return;
+  try {
+    const names = await fetchJSON('/api/metrics/names');
+
+    const groups = {
+      'Systeme':   [],
+      'CPU':       [],
+      'RAM':       [],
+      'Disque':    [],
+      'Reseau':    [],
+      'Docker':    [],
+      'Processus': [],
+      'Autre':     [],
+    };
+
+    for (const name of (names || [])) {
+      if (name.startsWith('cpu.'))        groups['CPU'].push(name);
+      else if (name.startsWith('ram.proc.')) groups['Processus'].push(name);
+      else if (name.startsWith('ram.'))   groups['RAM'].push(name);
+      else if (name.startsWith('disk.'))  groups['Disque'].push(name);
+      else if (name.startsWith('net.'))   groups['Reseau'].push(name);
+      else if (name.startsWith('docker.'))groups['Docker'].push(name);
+      else if (name.startsWith('system.'))groups['Systeme'].push(name);
+      else groups['Autre'].push(name);
+    }
+
+    sel.innerHTML = '<option value="">— Choisir une metrique —</option>';
+
+    const durOpt = document.createElement('option');
+    durOpt.value = '__action_durations__';
+    durOpt.textContent = 'Durees d\'execution des actions';
+    sel.appendChild(durOpt);
+
+    for (const [groupName, groupNames] of Object.entries(groups)) {
+      if (groupNames.length === 0) continue;
+      const og = document.createElement('optgroup');
+      og.label = groupName;
+      for (const name of groupNames) {
+        const opt = document.createElement('option');
+        opt.value = name;
+        opt.textContent = friendlyMetricName(name);
+        og.appendChild(opt);
+      }
+      sel.appendChild(og);
+    }
+  } catch (e) {
+    console.error('loadMetricNames:', e);
+  }
+}
+
+// ============================================================
+// Donnees tab — metric data browser
 // ============================================================
 let metricChartInstance = null;
 let currentDataPoints = [];
 let dataPage = 1;
 const DATA_PAGE_SIZE = 50;
 let currentPresetRange = 3600;
-
-async function loadMetricNames() {
-  try {
-    const resp = await fetch('/api/metrics/names');
-    if (!resp.ok) return;
-    const names = await resp.json();
-    const sel = document.getElementById('metric-select');
-    if (!sel) return;
-    const prev = sel.value;
-    sel.innerHTML = '<option value="">-- Choisir une métrique --</option>';
-    // Special option for action durations
-    const durOpt = document.createElement('option');
-    durOpt.value = '__action_durations__';
-    durOpt.textContent = 'Durées d\'exécution (actions)';
-    sel.appendChild(durOpt);
-    (names || []).forEach(n => {
-      const opt = document.createElement('option');
-      opt.value = n;
-      opt.textContent = n;
-      sel.appendChild(opt);
-    });
-    if (prev && (prev === '__action_durations__' || (names && names.includes(prev)))) sel.value = prev;
-  } catch (e) { /* ignore */ }
-}
 
 function setPreset(btn, range) {
   document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
@@ -370,9 +475,9 @@ function setPreset(btn, range) {
 function getTimeRange() {
   if (currentPresetRange === 'custom') {
     const fromEl = document.getElementById('range-from');
-    const toEl = document.getElementById('range-to');
+    const toEl   = document.getElementById('range-to');
     const from = fromEl && fromEl.value ? Math.floor(new Date(fromEl.value).getTime() / 1000) : Math.floor(Date.now() / 1000) - 86400;
-    const to = toEl && toEl.value ? Math.floor(new Date(toEl.value).getTime() / 1000) : Math.floor(Date.now() / 1000);
+    const to   = toEl && toEl.value   ? Math.floor(new Date(toEl.value).getTime() / 1000)   : Math.floor(Date.now() / 1000);
     return { from, to };
   }
   const to = Math.floor(Date.now() / 1000);
@@ -390,8 +495,7 @@ async function onMetricOrRangeChange() {
 
   if (name === '__action_durations__') {
     const { from, to } = getTimeRange();
-    const hours = Math.ceil((to - from) / 3600);
-    await loadActionDurations(hours);
+    await loadActionDurations(Math.ceil((to - from) / 3600));
     return;
   }
 
@@ -399,25 +503,23 @@ async function onMetricOrRangeChange() {
   const granularity = getGranularity();
   try {
     const url = `/api/metrics/query?name=${encodeURIComponent(name)}&from=${from}&to=${to}&granularity=${granularity}`;
-    const resp = await fetch(url);
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    currentDataPoints = (await resp.json()) || [];
+    currentDataPoints = (await fetchJSON(url)) || [];
     dataPage = 1;
     renderMetricChart(name, currentDataPoints);
     renderDataTable(currentDataPoints, dataPage);
     renderDataStats(currentDataPoints);
   } catch (e) {
-    showToast('Erreur chargement métriques: ' + e.message, 'error');
+    showToast('Erreur chargement metriques: ' + e.message, 'error');
   }
 }
 
 function renderMetricChart(name, points) {
   const canvas = document.getElementById('metric-chart');
   if (!canvas) return;
-  if (metricChartInstance) {
-    metricChartInstance.destroy();
-    metricChartInstance = null;
-  }
+  // Destroy any Chart.js instance on this canvas, tracked or stale
+  const stale = Chart.getChart(canvas);
+  if (stale) stale.destroy();
+  metricChartInstance = null;
   if (!points || points.length === 0) return;
   const labels = points.map(p => formatDate(p.TS || p.ts || 0));
   const values = points.map(p => p.Value !== undefined ? p.Value : (p.value !== undefined ? p.value : 0));
@@ -428,8 +530,8 @@ function renderMetricChart(name, points) {
       datasets: [{
         label: name,
         data: values,
-        borderColor: '#58a6ff',
-        backgroundColor: 'rgba(88,166,255,0.1)',
+        borderColor: '#6366f1',
+        backgroundColor: 'rgba(99,102,241,0.08)',
         borderWidth: 2,
         pointRadius: points.length > 200 ? 0 : 2,
         tension: 0.3,
@@ -445,19 +547,14 @@ function renderMetricChart(name, points) {
         tooltip: {
           mode: 'index',
           intersect: false,
-          backgroundColor: '#161b22',
-          borderColor: '#30363d',
+          backgroundColor: '#1a1d27',
+          borderColor: '#2d3142',
           borderWidth: 1,
         }
       },
       scales: {
-        x: {
-          grid: { color: '#21262d' },
-          ticks: { maxTicksLimit: 8, maxRotation: 0 },
-        },
-        y: {
-          grid: { color: '#21262d' },
-        }
+        x: { grid: { color: '#2d3142' }, ticks: { maxTicksLimit: 8, maxRotation: 0 } },
+        y: { grid: { color: '#2d3142' } }
       }
     }
   });
@@ -470,10 +567,10 @@ function renderDataTable(points, page) {
   const start = (page - 1) * DATA_PAGE_SIZE;
   const slice = (points || []).slice(start, start + DATA_PAGE_SIZE);
   if (slice.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="2" class="no-data">Aucune donnée.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="2" class="no-data">Aucune donnee.</td></tr>';
   } else {
     tbody.innerHTML = slice.map(p => {
-      const ts = p.TS || p.ts || 0;
+      const ts  = p.TS || p.ts || 0;
       const val = p.Value !== undefined ? p.Value : (p.value !== undefined ? p.value : 0);
       return `<tr><td class="text-mono" style="white-space:nowrap">${formatDate(ts)}</td><td>${val.toFixed(4)}</td></tr>`;
     }).join('');
@@ -509,67 +606,32 @@ function goPage(p) {
 function renderDataStats(points) {
   if (!points || points.length === 0) return;
   const values = points.map(p => p.Value !== undefined ? p.Value : (p.value || 0));
-  const mn = Math.min(...values);
-  const mx = Math.max(...values);
+  const mn  = Math.min(...values);
+  const mx  = Math.max(...values);
   const avg = values.reduce((a, b) => a + b, 0) / values.length;
-  const pv = p95(values);
+  const pv  = p95(values);
   const setVal = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v.toFixed(2); };
-  setVal('stat-min', mn);
-  setVal('stat-max', mx);
-  setVal('stat-avg', avg);
-  setVal('stat-p95', pv);
+  setVal('stat-min', mn); setVal('stat-max', mx); setVal('stat-avg', avg); setVal('stat-p95', pv);
   const countEl = document.getElementById('stat-count');
   if (countEl) countEl.textContent = values.length;
 }
 
 function exportCSV() {
   if (!currentDataPoints || currentDataPoints.length === 0) {
-    showToast('Aucune donnée à exporter.', 'error');
+    showToast('Aucune donnee a exporter.', 'error');
     return;
   }
   const lines = ['timestamp,value'];
   currentDataPoints.forEach(p => {
-    const ts = p.TS || p.ts || 0;
+    const ts  = p.TS || p.ts || 0;
     const val = p.Value !== undefined ? p.Value : (p.value || 0);
     lines.push(`${formatDate(ts)},${val}`);
   });
   const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'metrics_export.csv';
-  a.click();
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url; a.download = 'metrics_export.csv'; a.click();
   URL.revokeObjectURL(url);
-}
-
-// ============================================================
-// Graphs tab
-// ============================================================
-const graphTypes = ['ram', 'cpu', 'disk', 'network', 'docker', 'weekly'];
-
-function loadGraphs() {
-  graphTypes.forEach(type => {
-    const container = document.getElementById('graph-' + type);
-    if (!container) return;
-    container.innerHTML = '<span class="spinner"></span> Loading...';
-    const img = new Image();
-    img.onload = () => { container.innerHTML = ''; img.style.width = '100%'; container.appendChild(img); };
-    img.onerror = () => { container.innerHTML = '<span class="text-muted">Impossible de charger le graphe.</span>'; };
-    img.src = '/api/graphs/' + type + '?t=' + Date.now();
-    img.alt = type + ' graph';
-  });
-}
-
-function refreshGraphs() { loadGraphs(); }
-
-async function testReport() {
-  try {
-    const resp = await fetch('/api/report/test', { method: 'POST' });
-    const data = await resp.json();
-    showToast(data.message || 'Rapport test envoyé !');
-  } catch (e) {
-    showToast('Erreur rapport test: ' + e.message, 'error');
-  }
 }
 
 // ============================================================
@@ -578,29 +640,27 @@ async function testReport() {
 async function refreshActions() {
   const tbody = document.getElementById('actions-tbody');
   try {
-    const resp = await fetch('/api/actions');
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    const actions = await resp.json();
+    const actions = await fetchJSON('/api/actions');
     if (!actions || actions.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="5" class="no-data">Aucune action enregistrée.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="5" class="no-data">Aucune action enregistree.</td></tr>';
       return;
     }
     tbody.innerHTML = actions.map(a => {
-      const t = new Date(a.TS * 1000).toLocaleString();
+      const t = new Date(a.TS * 1000).toLocaleString('fr-FR');
       const typeLower = (a.ActionType || '').toLowerCase();
       const badgeClass = typeLower.includes('ram') ? 'badge-ram'
-        : typeLower.includes('cpu') ? 'badge-cpu'
+        : typeLower.includes('cpu')  ? 'badge-cpu'
         : typeLower.includes('disk') ? 'badge-disk'
         : 'badge-docker';
       const status = a.Success
         ? '<span class="badge badge-ok">OK</span>'
-        : '<span class="badge badge-fail">FAILED</span>';
+        : '<span class="badge badge-fail">ECHEC</span>';
       const details = (a.Details || '').substring(0, 120) + (a.Details && a.Details.length > 120 ? '…' : '');
       return `<tr>
         <td class="text-mono" style="white-space:nowrap">${t}</td>
         <td><span class="badge ${badgeClass}">${a.ActionType || '—'}</span></td>
-        <td>${a.Trigger || '—'}</td>
-        <td class="text-muted">${details}</td>
+        <td>${escapeHtml(a.Trigger || '—')}</td>
+        <td class="text-muted">${escapeHtml(details)}</td>
         <td>${status}</td>
       </tr>`;
     }).join('');
@@ -613,14 +673,6 @@ async function refreshActions() {
 // Config tab
 // ============================================================
 
-// Collapsible sections
-function toggleSection(header) {
-  const body = header.nextElementSibling;
-  const arrow = header.querySelector('.arrow');
-  if (body) body.classList.toggle('hidden');
-  if (arrow) header.classList.toggle('collapsed');
-}
-
 // Schedule windows
 let scheduleWindows = [];
 const DAYS_FR = ['L', 'M', 'Me', 'J', 'V', 'S', 'D'];
@@ -630,7 +682,7 @@ function renderScheduleWindows() {
   const list = document.getElementById('schedule-windows-list');
   if (!list) return;
   if (scheduleWindows.length === 0) {
-    list.innerHTML = '<div class="text-muted" style="font-size:0.85rem">Aucune plage configurée.</div>';
+    list.innerHTML = '<div class="text-muted" style="font-size:0.85rem">Aucune plage configuree.</div>';
     return;
   }
   list.innerHTML = scheduleWindows.map((w, idx) => {
@@ -663,15 +715,15 @@ function readScheduleWindows() {
   const list = document.getElementById('schedule-windows-list');
   if (!list) return scheduleWindows;
   const windows = [];
-  list.querySelectorAll('.schedule-window').forEach((row, idx) => {
+  list.querySelectorAll('.schedule-window').forEach(row => {
     const days = [];
     row.querySelectorAll('.day-check:checked').forEach(cb => days.push(cb.value));
     const startInput = row.querySelector('[data-field="start"]');
-    const endInput = row.querySelector('[data-field="end"]');
+    const endInput   = row.querySelector('[data-field="end"]');
     windows.push({
       days: days.length === 7 ? ['*'] : days,
       start: startInput ? startInput.value : '07:00',
-      end: endInput ? endInput.value : '22:00',
+      end:   endInput   ? endInput.value   : '22:00',
     });
   });
   return windows;
@@ -679,9 +731,7 @@ function readScheduleWindows() {
 
 async function loadFullConfig() {
   try {
-    const resp = await fetch('/api/config/full');
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    const cfg = await resp.json();
+    const cfg = await fetchJSON('/api/config/full');
 
     // Schedule
     const se = document.getElementById('cfg-schedule-enabled');
@@ -726,9 +776,18 @@ async function loadFullConfig() {
     setValue('cfg-db-max-size', db.max_size_mb);
 
     // Brevo / Notifications
-    const br = cfg.brevo || {};
+    const br  = cfg.brevo || {};
     setValue('cfg-brevo-email', br.sender_email);
     setValue('cfg-brevo-name', br.sender_name);
+    // API key: never show the real key, but indicate if one is configured
+    const keyInput = document.getElementById('cfg-brevo-key');
+    if (keyInput) {
+      keyInput.value = '';
+      keyInput.placeholder = br.has_api_key
+        ? '✓ Clé configurée — saisir pour modifier'
+        : 'Entrer la clé API Brevo';
+      keyInput.dataset.hasKey = br.has_api_key ? '1' : '0';
+    }
     const rcp = cfg.recipients || {};
     setValue('cfg-recipients', (rcp.emails || []).join(', '));
     const wk = cfg.weekly || {};
@@ -737,12 +796,6 @@ async function loadFullConfig() {
     const wkGraphs = document.getElementById('cfg-weekly-graphs');
     if (wkGraphs) wkGraphs.checked = !!wk.include_graphs;
 
-    // General
-    const gen = cfg.general || {};
-    setValue('cfg-log-dir', gen.log_dir);
-    setValue('cfg-db-path', gen.db_path);
-    setValue('cfg-top-procs', gen.top_processes_n);
-
     loadDBStats();
   } catch (e) {
     showToast('Erreur chargement config: ' + e.message, 'error');
@@ -750,62 +803,59 @@ async function loadFullConfig() {
 }
 
 async function saveFullConfig() {
-  const getVal = id => { const el = document.getElementById(id); return el ? el.value : undefined; };
-  const getNum = id => { const v = parseFloat(getVal(id)); return isNaN(v) ? undefined : v; };
-  const getInt = id => { const v = parseInt(getVal(id), 10); return isNaN(v) ? undefined : v; };
+  const getVal  = id => { const el = document.getElementById(id); return el ? el.value : undefined; };
+  const getNum  = id => { const v = parseFloat(getVal(id)); return isNaN(v) ? undefined : v; };
+  const getInt  = id => { const v = parseInt(getVal(id), 10); return isNaN(v) ? undefined : v; };
   const getBool = id => { const el = document.getElementById(id); return el ? el.checked : undefined; };
 
   const recipientsRaw = getVal('cfg-recipients') || '';
   const emails = recipientsRaw.split(',').map(s => s.trim()).filter(Boolean);
-
   const windows = readScheduleWindows();
 
   const payload = {
-    schedule: {
-      enabled: getBool('cfg-schedule-enabled'),
-      timezone: getVal('cfg-schedule-tz'),
-      windows,
-    },
+    schedule: { enabled: getBool('cfg-schedule-enabled'), timezone: getVal('cfg-schedule-tz'), windows },
     collection: {
-      ram_interval_s: getInt('cfg-coll-ram'),
-      cpu_interval_s: getInt('cfg-coll-cpu'),
+      ram_interval_s:     getInt('cfg-coll-ram'),
+      cpu_interval_s:     getInt('cfg-coll-cpu'),
       network_interval_s: getInt('cfg-coll-net'),
-      docker_interval_s: getInt('cfg-coll-docker'),
-      disk_interval_s: getInt('cfg-coll-disk'),
+      docker_interval_s:  getInt('cfg-coll-docker'),
+      disk_interval_s:    getInt('cfg-coll-disk'),
       process_interval_s: getInt('cfg-coll-proc'),
-      system_interval_s: getInt('cfg-coll-sys'),
+      system_interval_s:  getInt('cfg-coll-sys'),
     },
     thresholds: {
-      ram_pct: getNum('cfg-ram-pct'),
-      cpu_pct: getNum('cfg-cpu-pct'),
-      cpu_sustained_minutes: getInt('cfg-cpu-sustained'),
-      disk_pct: getNum('cfg-disk-pct'),
-      ram_alert_cooldown_minutes: getInt('cfg-ram-cooldown'),
-      cpu_alert_cooldown_minutes: getInt('cfg-cpu-cooldown'),
+      ram_pct:                   getNum('cfg-ram-pct'),
+      cpu_pct:                   getNum('cfg-cpu-pct'),
+      cpu_sustained_minutes:     getInt('cfg-cpu-sustained'),
+      disk_pct:                  getNum('cfg-disk-pct'),
+      ram_alert_cooldown_minutes:getInt('cfg-ram-cooldown'),
+      cpu_alert_cooldown_minutes:getInt('cfg-cpu-cooldown'),
       disk_alert_cooldown_hours: getInt('cfg-disk-cooldown'),
     },
     docker: {
-      auto_stop: getBool('cfg-auto-stop'),
-      idle_cpu_pct: getNum('cfg-idle-cpu'),
+      auto_stop:             getBool('cfg-auto-stop'),
+      idle_cpu_pct:          getNum('cfg-idle-cpu'),
       idle_duration_minutes: getInt('cfg-idle-dur'),
-      stop_order: stopOrderData,
+      stop_order:            stopOrderData,
     },
     database: {
-      raw_ttl_hours: getInt('cfg-db-raw-ttl'),
-      hourly_ttl_days: getInt('cfg-db-hourly-ttl'),
+      raw_ttl_hours:    getInt('cfg-db-raw-ttl'),
+      hourly_ttl_days:  getInt('cfg-db-hourly-ttl'),
       weekly_ttl_weeks: getInt('cfg-db-weekly-ttl'),
-      max_size_mb: getInt('cfg-db-max-size'),
+      max_size_mb:      getInt('cfg-db-max-size'),
     },
-    brevo: {
-      api_key: getVal('cfg-brevo-key') || '',
-      sender_email: getVal('cfg-brevo-email'),
-      sender_name: getVal('cfg-brevo-name'),
-    },
+    brevo: (() => {
+      const keyVal = getVal('cfg-brevo-key') || '';
+      const b = { sender_email: getVal('cfg-brevo-email'), sender_name: getVal('cfg-brevo-name') };
+      // Only send api_key if the user actually typed something new
+      if (keyVal) b.api_key = keyVal;
+      return b;
+    })(),
     recipients: { emails },
     weekly: {
-      hour_utc: getInt('cfg-weekly-hour'),
+      hour_utc:         getInt('cfg-weekly-hour'),
       weeks_comparison: getInt('cfg-weekly-weeks'),
-      include_graphs: getBool('cfg-weekly-graphs'),
+      include_graphs:   getBool('cfg-weekly-graphs'),
     },
   };
 
@@ -816,7 +866,7 @@ async function saveFullConfig() {
       body: JSON.stringify(payload),
     });
     if (!resp.ok) throw new Error((await resp.text()) || 'HTTP ' + resp.status);
-    showToast('Configuration enregistrée.');
+    showToast('Configuration enregistree.');
   } catch (e) {
     showToast('Erreur sauvegarde: ' + e.message, 'error');
   }
@@ -825,23 +875,20 @@ async function saveFullConfig() {
 // DB stats / vacuum / cleanup
 async function loadDBStats() {
   try {
-    const resp = await fetch('/api/db/stats');
-    if (!resp.ok) return;
-    const s = await resp.json();
+    const s = await fetchJSON('/api/db/stats');
     const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
     set('db-stat-size', formatBytes(s.file_size_bytes));
-    set('db-stat-raw', (s.raw_rows || 0).toLocaleString());
-    set('db-stat-hourly', (s.hourly_rows || 0).toLocaleString());
-    set('db-stat-actions', (s.action_rows || 0).toLocaleString());
-    set('db-stat-weekly', (s.weekly_rows || 0).toLocaleString());
+    set('db-stat-raw',     (s.raw_rows    || 0).toLocaleString());
+    set('db-stat-hourly',  (s.hourly_rows  || 0).toLocaleString());
+    set('db-stat-actions', (s.action_rows  || 0).toLocaleString());
+    set('db-stat-weekly',  (s.weekly_rows  || 0).toLocaleString());
   } catch (e) { /* ignore */ }
 }
 
 async function doVacuum() {
   try {
-    const resp = await fetch('/api/db/vacuum', { method: 'POST' });
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    showToast('Vacuum terminé.');
+    await fetch('/api/db/vacuum', { method: 'POST' });
+    showToast('Vacuum termine.');
     loadDBStats();
   } catch (e) {
     showToast('Erreur vacuum: ' + e.message, 'error');
@@ -850,9 +897,8 @@ async function doVacuum() {
 
 async function doCleanup() {
   try {
-    const resp = await fetch('/api/db/cleanup', { method: 'POST' });
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    showToast('Nettoyage terminé.');
+    await fetch('/api/db/cleanup', { method: 'POST' });
+    showToast('Nettoyage termine.');
     loadDBStats();
   } catch (e) {
     showToast('Erreur nettoyage: ' + e.message, 'error');
@@ -870,7 +916,7 @@ function renderStopOrderList(order) {
   const list = document.getElementById('stop-order-list');
   if (!list) return;
   if (!stopOrderData || stopOrderData.length === 0) {
-    list.innerHTML = '<li class="stop-order-empty">Aucun conteneur dans l\'ordre d\'arrêt.</li>';
+    list.innerHTML = '<li class="stop-order-empty">Aucun conteneur dans l\'ordre d\'arret.</li>';
     return;
   }
   list.innerHTML = stopOrderData.map((name, i) => `
@@ -881,7 +927,7 @@ function renderStopOrderList(order) {
         ondragleave="onDragLeave(event)"
         ondragend="onDragEnd(event)">
       <span class="drag-handle">⠿</span>
-      <span style="flex:1">${name}</span>
+      <span style="flex:1">${escapeHtml(name)}</span>
       <button class="btn btn-danger" style="padding:2px 8px;font-size:11px" onclick="removeFromStopOrder(${i})">✕</button>
     </li>`).join('');
 }
@@ -919,7 +965,7 @@ function addToStopOrder() {
   const input = document.getElementById('new-container-name');
   const name = input.value.trim();
   if (!name) return;
-  if (stopOrderData.includes(name)) { showToast('Conteneur déjà dans la liste.', 'error'); return; }
+  if (stopOrderData.includes(name)) { showToast('Conteneur deja dans la liste.', 'error'); return; }
   stopOrderData.push(name);
   renderStopOrderList(stopOrderData);
   input.value = '';
@@ -938,117 +984,15 @@ async function saveStopOrder() {
       body: JSON.stringify(stopOrderData),
     });
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    showToast('Ordre d\'arrêt sauvegardé.');
+    showToast('Ordre d\'arret sauvegarde.');
   } catch (e) {
     showToast('Erreur sauvegarde ordre: ' + e.message, 'error');
   }
 }
 
-// ============================================================
-// Legacy config support (old /api/config endpoint)
-// ============================================================
-async function loadConfig() { return loadFullConfig(); }
-async function saveConfig(ev) { if (ev) ev.preventDefault(); return saveFullConfig(); }
-
-// ============================================================
-// Logs tab
-// ============================================================
-let logRefreshTimer = null;
-
-async function refreshLogs() {
-  const container = document.getElementById('logs-container');
-  const linesInput = document.getElementById('log-lines');
-  const n = parseInt((linesInput && linesInput.value) || '200', 10) || 200;
-  try {
-    const resp = await fetch('/api/logs?lines=' + n);
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    const lines = await resp.json();
-    if (!lines || lines.length === 0) {
-      container.innerHTML = '<div class="log-line text-muted">Aucun log.</div>';
-      return;
-    }
-    container.innerHTML = lines.map(line => {
-      let cls = 'log-line';
-      const lower = line.toLowerCase();
-      if (lower.includes('error') || lower.includes('fatal')) cls += ' error';
-      else if (lower.includes('warn')) cls += ' warn';
-      else if (lower.includes('info') || lower.includes('action')) cls += ' info';
-      return `<div class="${cls}">${escapeHtml(line)}</div>`;
-    }).join('');
-    const autoScroll = document.getElementById('log-autoscroll');
-    if (autoScroll && autoScroll.checked) container.scrollTop = container.scrollHeight;
-  } catch (e) {
-    if (container) container.innerHTML = `<div class="log-line error">Erreur: ${e.message}</div>`;
-  }
-}
-
-// ============================================================
-// Tab switching
-// ============================================================
-let metricNamesLoaded = false;
-let actionsRefreshTimer = null;
-
-function switchTab(name) {
-  document.querySelectorAll('.tab-btn').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.tab === name);
-  });
-  document.querySelectorAll('.tab-panel').forEach(panel => {
-    panel.classList.toggle('active', panel.id === 'tab-' + name);
-  });
-  location.hash = name;
-
-  // Clear old timers
-  if (name !== 'logs' && logRefreshTimer) { clearInterval(logRefreshTimer); logRefreshTimer = null; }
-  if (name !== 'actions' && actionsRefreshTimer) { clearInterval(actionsRefreshTimer); actionsRefreshTimer = null; }
-
-  if (name === 'donnees') {
-    if (!metricNamesLoaded) {
-      metricNamesLoaded = true;
-      loadMetricNames();
-    }
-  } else if (name === 'graphs') {
-    loadGraphs();
-  } else if (name === 'actions') {
-    refreshActions();
-    if (!actionsRefreshTimer) actionsRefreshTimer = setInterval(refreshActions, 60000);
-  } else if (name === 'config') {
-    loadFullConfig();
-    loadCaps();
-  } else if (name === 'logs') {
-    refreshLogs();
-    if (logRefreshTimer) clearInterval(logRefreshTimer);
-    logRefreshTimer = setInterval(refreshLogs, 15000);
-  }
-}
-
-// ============================================================
-// Clock and hostname
-// ============================================================
-function updateClock() {
-  const el = document.getElementById('current-time');
-  if (el) el.textContent = new Date().toUTCString().replace('GMT', 'UTC');
-}
-
-// ============================================================
-// Fallback polling (complement SSE)
-// ============================================================
-async function pollLatestMetrics() {
-  try {
-    const resp = await fetch('/api/metrics/latest');
-    if (!resp.ok) return;
-    const data = await resp.json();
-    handleSSEMessage({
-      ram_pct: data['ram.used_pct'],
-      cpu_pct: data['cpu.total'],
-      disk_pct: data['disk.root.used_pct'],
-      swap_pct: data['system.swap_pct'],
-      load_1: data['cpu.load_1'],
-      load_5: data['cpu.load_5'],
-      net_recv_kb: (data['net.bytes_recv_delta'] || 0) / 1024,
-      net_sent_kb: (data['net.bytes_sent_delta'] || 0) / 1024,
-    });
-  } catch (e) { /* ignore */ }
-}
+// Legacy
+async function loadConfig()  { return loadFullConfig(); }
+async function saveConfig(ev){ if (ev) ev.preventDefault(); return saveFullConfig(); }
 
 // ============================================================
 // Caps management
@@ -1057,9 +1001,7 @@ let capsData = [];
 
 async function loadCaps() {
   try {
-    const resp = await fetch('/api/caps');
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    capsData = (await resp.json()) || [];
+    capsData = (await fetchJSON('/api/caps')) || [];
     renderCapsList();
   } catch (e) {
     showToast('Erreur chargement caps: ' + e.message, 'error');
@@ -1085,7 +1027,7 @@ function renderCapsList() {
   const container = document.getElementById('caps-list');
   if (!container) return;
   if (!capsData || capsData.length === 0) {
-    container.innerHTML = '<div class="text-muted" style="font-size:0.85rem">Aucun cap configuré.</div>';
+    container.innerHTML = '<div class="text-muted" style="font-size:0.85rem">Aucune regle configuree.</div>';
     return;
   }
   container.innerHTML = capsData.map((cap, i) => renderCap(cap, i)).join('');
@@ -1093,9 +1035,9 @@ function renderCapsList() {
 
 function renderCap(cap, index) {
   const actions = (cap.action || []).map((a, ai) => renderCapAction(a, index, ai)).join('');
-  return `<div class="card" style="border:1px solid #30363d;padding:1rem" data-cap-index="${index}">
+  return `<div class="card" style="padding:1rem" data-cap-index="${index}">
     <div class="flex-row" style="justify-content:space-between;margin-bottom:0.75rem">
-      <strong style="font-size:0.95rem">Cap #${index + 1}</strong>
+      <strong style="font-size:0.95rem">Regle #${index + 1}</strong>
       <button class="btn btn-danger" style="padding:2px 10px;font-size:0.8rem" onclick="removeCap(${index})">Supprimer</button>
     </div>
     <div class="form-row">
@@ -1107,11 +1049,11 @@ function renderCap(cap, index) {
       <input type="text" class="form-input" style="width:340px" value="${escapeHtml(cap.description || '')}" onchange="capField(${index},'description',this.value)">
     </div>
     <div class="form-row">
-      <span class="form-label">Métrique</span>
+      <span class="form-label">Metrique</span>
       <input type="text" class="form-input" style="width:220px" list="common-metrics" value="${escapeHtml(cap.metric || '')}" onchange="capField(${index},'metric',this.value)">
     </div>
     <div class="form-row">
-      <span class="form-label">Opérateur</span>
+      <span class="form-label">Operateur</span>
       <select class="form-input" style="width:90px" onchange="capField(${index},'operator',this.value)">
         ${['>', '>=', '<', '<=', '=='].map(op => `<option value="${op}"${cap.operator===op?' selected':''}>${op}</option>`).join('')}
       </select>
@@ -1132,7 +1074,7 @@ function renderCap(cap, index) {
       </label>
     </div>
     <div class="form-row">
-      <span class="form-label">Activé</span>
+      <span class="form-label">Active</span>
       <label class="form-toggle">
         <input type="checkbox" ${cap.enabled ? 'checked' : ''} onchange="capField(${index},'enabled',this.checked)">
         <span class="slider"></span>
@@ -1149,14 +1091,13 @@ function renderCap(cap, index) {
 function renderCapAction(a, capIndex, actionIndex) {
   const types = ['email', 'docker_stop', 'docker_restart', 'docker_stop_idle', 'shell', 'http_webhook', 'log_only'];
   const typeOpts = types.map(t => `<option value="${t}"${a.type===t?' selected':''}>${t}</option>`).join('');
-
   const showContainer = (a.type === 'docker_stop' || a.type === 'docker_restart');
-  const showIdle = a.type === 'docker_stop_idle';
-  const showShell = a.type === 'shell';
-  const showEmail = a.type === 'email';
+  const showIdle    = a.type === 'docker_stop_idle';
+  const showShell   = a.type === 'shell';
+  const showEmail   = a.type === 'email';
   const showWebhook = a.type === 'http_webhook';
 
-  return `<div class="card" style="border:1px solid #21262d;padding:0.75rem;background:#0d1117" data-action-index="${actionIndex}">
+  return `<div class="card" style="border:1px solid #2d3142;padding:0.75rem;background:var(--input-bg)" data-action-index="${actionIndex}">
     <div class="flex-row" style="justify-content:space-between;margin-bottom:0.5rem">
       <select class="form-input" style="width:180px" onchange="capActionField(${capIndex},${actionIndex},'type',this.value);renderCapsList()">
         ${typeOpts}
@@ -1175,7 +1116,7 @@ function renderCapAction(a, capIndex, actionIndex) {
     ${showEmail ? `<div class="form-row"><span class="form-label">Sujet</span><input type="text" class="form-input" style="width:340px" value="${escapeHtml(a.subject||'')}" placeholder="{value} {metric}" onchange="capActionField(${capIndex},${actionIndex},'subject',this.value)"></div>` : ''}
     ${showWebhook ? `
       <div class="form-row"><span class="form-label">URL</span><input type="text" class="form-input" style="width:300px" value="${escapeHtml(a.url||'')}" onchange="capActionField(${capIndex},${actionIndex},'url',this.value)"></div>
-      <div class="form-row"><span class="form-label">Méthode</span>
+      <div class="form-row"><span class="form-label">Methode</span>
         <select class="form-input" style="width:90px" onchange="capActionField(${capIndex},${actionIndex},'method',this.value)">
           <option value="POST"${(a.method||'POST')==='POST'?' selected':''}>POST</option>
           <option value="GET"${a.method==='GET'?' selected':''}>GET</option>
@@ -1222,33 +1163,34 @@ async function saveCaps() {
       body: JSON.stringify(capsData),
     });
     if (!resp.ok) throw new Error((await resp.text()) || 'HTTP ' + resp.status);
-    showToast('Caps enregistrés.');
+    showToast('Regles enregistrees.');
   } catch (e) {
     showToast('Erreur sauvegarde caps: ' + e.message, 'error');
   }
 }
 
 // ============================================================
-// Action durations chart (Données tab)
+// Action durations chart
 // ============================================================
 let actionDurationsChart = null;
 
 async function loadActionDurations(hours) {
   try {
-    const resp = await fetch('/api/metrics/action-durations?hours=' + (hours || 168));
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    const points = (await resp.json()) || [];
+    const points = (await fetchJSON('/api/metrics/action-durations?hours=' + (hours || 168))) || [];
     renderActionDurationsChart(points);
   } catch (e) {
-    showToast('Erreur durées actions: ' + e.message, 'error');
+    showToast('Erreur durees actions: ' + e.message, 'error');
   }
 }
 
 function renderActionDurationsChart(points) {
   const canvas = document.getElementById('metric-chart');
   if (!canvas) return;
-  if (metricChartInstance) { metricChartInstance.destroy(); metricChartInstance = null; }
-  if (actionDurationsChart) { actionDurationsChart.destroy(); actionDurationsChart = null; }
+  // Destroy any Chart.js instance on this canvas, tracked or stale
+  const staleD = Chart.getChart(canvas);
+  if (staleD) staleD.destroy();
+  metricChartInstance = null;
+  actionDurationsChart = null;
   if (!points || points.length === 0) return;
   const labels = points.map(p => formatDate(p.TS || p.ts || 0));
   const values = points.map(p => p.Value !== undefined ? p.Value : (p.value !== undefined ? p.value : 0));
@@ -1257,10 +1199,10 @@ function renderActionDurationsChart(points) {
     data: {
       labels,
       datasets: [{
-        label: 'Durée (ms)',
+        label: 'Duree (ms)',
         data: values,
-        backgroundColor: 'rgba(88,166,255,0.7)',
-        borderColor: '#58a6ff',
+        backgroundColor: 'rgba(99,102,241,0.6)',
+        borderColor: '#6366f1',
         borderWidth: 1,
       }]
     },
@@ -1270,21 +1212,134 @@ function renderActionDurationsChart(points) {
       animation: false,
       plugins: {
         legend: { display: false },
-        tooltip: { mode: 'index', intersect: false, backgroundColor: '#161b22', borderColor: '#30363d', borderWidth: 1 }
+        tooltip: { mode: 'index', intersect: false, backgroundColor: '#1a1d27', borderColor: '#2d3142', borderWidth: 1 }
       },
       scales: {
-        x: { grid: { color: '#21262d' }, ticks: { maxTicksLimit: 8, maxRotation: 0 } },
-        y: { grid: { color: '#21262d' }, title: { display: true, text: 'ms' } }
+        x: { grid: { color: '#2d3142' }, ticks: { maxTicksLimit: 8, maxRotation: 0 } },
+        y: { grid: { color: '#2d3142' }, title: { display: true, text: 'ms' } }
       }
     }
   });
 }
 
 // ============================================================
+// Report test
+// ============================================================
+async function testReport() {
+  try {
+    const data = await fetchJSON('/api/report/test');
+    // fetchJSON uses GET; report test needs POST
+    throw new Error('use POST');
+  } catch {
+    try {
+      const resp = await fetch('/api/report/test', { method: 'POST' });
+      const data = await resp.json();
+      showToast(data.message || 'Rapport test envoye !');
+    } catch (e) {
+      showToast('Erreur rapport test: ' + e.message, 'error');
+    }
+  }
+}
+
+// ============================================================
+// Logs tab
+// ============================================================
+let logRefreshTimer = null;
+
+async function refreshLogs() {
+  const container  = document.getElementById('logs-container');
+  const linesInput = document.getElementById('log-lines');
+  const n = parseInt((linesInput && linesInput.value) || '200', 10) || 200;
+  try {
+    const lines = await fetchJSON('/api/logs?lines=' + n);
+    if (!lines || lines.length === 0) {
+      container.innerHTML = '<div class="log-line text-muted">Aucun log.</div>';
+      return;
+    }
+    container.innerHTML = lines.map(line => {
+      let cls = 'log-line';
+      const lower = line.toLowerCase();
+      if (lower.includes('error') || lower.includes('fatal')) cls += ' error';
+      else if (lower.includes('warn')) cls += ' warn';
+      else if (lower.includes('info') || lower.includes('action')) cls += ' info';
+      return `<div class="${cls}">${escapeHtml(line)}</div>`;
+    }).join('');
+    const autoScroll = document.getElementById('log-autoscroll');
+    if (autoScroll && autoScroll.checked) container.scrollTop = container.scrollHeight;
+  } catch (e) {
+    if (container) container.innerHTML = `<div class="log-line error">Erreur: ${e.message}</div>`;
+  }
+}
+
+// ============================================================
+// Tab switching
+// ============================================================
+let metricNamesLoaded = false;
+let actionsRefreshTimer = null;
+
+function switchTab(name) {
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.tab === name);
+  });
+  document.querySelectorAll('.tab-panel').forEach(panel => {
+    panel.classList.toggle('active', panel.id === 'tab-' + name);
+  });
+  location.hash = name;
+
+  // Clear old timers
+  if (name !== 'logs'    && logRefreshTimer)     { clearInterval(logRefreshTimer);     logRefreshTimer = null; }
+  if (name !== 'actions' && actionsRefreshTimer) { clearInterval(actionsRefreshTimer); actionsRefreshTimer = null; }
+  if (name !== 'docker'  && dockerRefreshTimer)  { clearInterval(dockerRefreshTimer);  dockerRefreshTimer = null; }
+
+  if (name === 'docker') {
+    loadDockerTab();
+    if (!dockerRefreshTimer) dockerRefreshTimer = setInterval(loadDockerTab, 15000);
+  } else if (name === 'donnees') {
+    if (!metricNamesLoaded) { metricNamesLoaded = true; loadMetricNames(); }
+  } else if (name === 'actions') {
+    refreshActions();
+    if (!actionsRefreshTimer) actionsRefreshTimer = setInterval(refreshActions, 60000);
+  } else if (name === 'config') {
+    loadFullConfig();
+    loadCaps();
+  } else if (name === 'logs') {
+    refreshLogs();
+    if (logRefreshTimer) clearInterval(logRefreshTimer);
+    logRefreshTimer = setInterval(refreshLogs, 15000);
+  }
+}
+
+// ============================================================
+// Clock
+// ============================================================
+function updateClock() {
+  const el = document.getElementById('current-time');
+  if (el) el.textContent = new Date().toUTCString().replace('GMT', 'UTC');
+}
+
+// ============================================================
+// Fallback polling
+// ============================================================
+async function pollLatestMetrics() {
+  try {
+    const data = await fetchJSON('/api/metrics/latest');
+    handleSSEMessage({
+      ram_pct:     data['ram.used_pct'],
+      cpu_pct:     data['cpu.total'],
+      disk_pct:    data['disk.root.used_pct'],
+      swap_pct:    data['system.swap_pct'],
+      load_1:      data['cpu.load_1'],
+      load_5:      data['cpu.load_5'],
+      net_recv_kb: (data['net.bytes_recv_delta'] || 0) / 1024,
+      net_sent_kb: (data['net.bytes_sent_delta'] || 0) / 1024,
+    });
+  } catch (e) { /* ignore */ }
+}
+
+// ============================================================
 // Init
 // ============================================================
 document.addEventListener('DOMContentLoaded', () => {
-  // Tab click handlers
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => switchTab(btn.dataset.tab));
   });
@@ -1299,9 +1354,6 @@ document.addEventListener('DOMContentLoaded', () => {
   updateClock();
   setInterval(updateClock, 1000);
   document.getElementById('hostname').textContent = location.hostname;
-
-  refreshDocker();
-  setInterval(refreshDocker, 30000);
 
   pollLatestMetrics();
   setInterval(pollLatestMetrics, 5000);
