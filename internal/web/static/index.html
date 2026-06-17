@@ -1,10 +1,11 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="fr">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>VPS Watchdog</title>
   <link rel="stylesheet" href="/static/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
 
@@ -32,16 +33,18 @@
   <!-- Tabs -->
   <div class="tabs">
     <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
-    <button class="tab-btn" data-tab="graphs">Graphs</button>
+    <button class="tab-btn" data-tab="donnees">Données</button>
+    <button class="tab-btn" data-tab="graphs">Graphes</button>
     <button class="tab-btn" data-tab="actions">Actions</button>
     <button class="tab-btn" data-tab="config">Config</button>
     <button class="tab-btn" data-tab="logs">Logs</button>
   </div>
 
+  <!-- ══════════════════════════════════════════ -->
   <!-- Dashboard Tab -->
+  <!-- ══════════════════════════════════════════ -->
   <div id="tab-dashboard" class="tab-panel active">
 
-    <!-- Metric Cards -->
     <div class="metrics-grid">
       <div class="metric-card">
         <div class="metric-label">RAM Usage</div>
@@ -81,7 +84,6 @@
       </div>
     </div>
 
-    <!-- Sparklines -->
     <div class="sparklines">
       <div class="sparkline-card">
         <div class="sparkline-header">
@@ -99,7 +101,6 @@
       </div>
     </div>
 
-    <!-- Docker Containers -->
     <div class="section-title">
       Docker Containers
       <button class="btn" onclick="refreshDocker()">Refresh</button>
@@ -109,56 +110,115 @@
     </div>
   </div>
 
+  <!-- ══════════════════════════════════════════ -->
+  <!-- Données Tab -->
+  <!-- ══════════════════════════════════════════ -->
+  <div id="tab-donnees" class="tab-panel">
+    <div class="flex-row mb-16">
+      <span class="section-title" style="margin-bottom:0">Explorateur de métriques</span>
+      <button class="btn btn-primary" onclick="exportCSV()">Export CSV</button>
+    </div>
+
+    <div class="data-controls">
+      <select id="metric-select" class="metric-select" onchange="onMetricOrRangeChange()">
+        <option value="">-- Choisir une métrique --</option>
+      </select>
+
+      <div class="time-presets">
+        <button class="preset-btn active" data-range="3600" onclick="setPreset(this,3600)">1h</button>
+        <button class="preset-btn" data-range="21600" onclick="setPreset(this,21600)">6h</button>
+        <button class="preset-btn" data-range="86400" onclick="setPreset(this,86400)">24h</button>
+        <button class="preset-btn" data-range="604800" onclick="setPreset(this,604800)">7j</button>
+        <button class="preset-btn" data-range="2592000" onclick="setPreset(this,2592000)">30j</button>
+        <button class="preset-btn" data-range="custom" onclick="setPreset(this,'custom')">Personnalisé</button>
+      </div>
+
+      <div id="custom-range" style="display:none;gap:0.5rem;align-items:center" class="flex-row">
+        <input type="datetime-local" id="range-from" class="form-input" style="width:auto">
+        <span class="text-muted">→</span>
+        <input type="datetime-local" id="range-to" class="form-input" style="width:auto">
+        <button class="btn" onclick="onMetricOrRangeChange()">Appliquer</button>
+      </div>
+
+      <div class="flex-row" style="gap:0.5rem">
+        <label class="text-muted" style="font-size:0.8rem">Granularité :</label>
+        <label style="font-size:0.82rem"><input type="radio" name="granularity" value="auto" checked onchange="onMetricOrRangeChange()"> Auto</label>
+        <label style="font-size:0.82rem"><input type="radio" name="granularity" value="raw" onchange="onMetricOrRangeChange()"> Brut</label>
+        <label style="font-size:0.82rem"><input type="radio" name="granularity" value="hourly" onchange="onMetricOrRangeChange()"> Horaire</label>
+      </div>
+    </div>
+
+    <div class="data-stats" id="data-stats" style="display:none">
+      <div class="data-stat"><div class="val" id="stat-min">—</div><div class="lbl">Min</div></div>
+      <div class="data-stat"><div class="val" id="stat-max">—</div><div class="lbl">Max</div></div>
+      <div class="data-stat"><div class="val" id="stat-avg">—</div><div class="lbl">Moyenne</div></div>
+      <div class="data-stat"><div class="val" id="stat-p95">—</div><div class="lbl">P95</div></div>
+      <div class="data-stat"><div class="val" id="stat-count">—</div><div class="lbl">Points</div></div>
+    </div>
+
+    <div class="chart-container">
+      <canvas id="metric-chart"></canvas>
+    </div>
+
+    <div class="data-table-wrap">
+      <table>
+        <thead><tr><th>Horodatage</th><th>Valeur</th></tr></thead>
+        <tbody id="data-tbody"></tbody>
+      </table>
+    </div>
+    <div class="pagination" id="data-pagination"></div>
+  </div>
+
+  <!-- ══════════════════════════════════════════ -->
   <!-- Graphs Tab -->
+  <!-- ══════════════════════════════════════════ -->
   <div id="tab-graphs" class="tab-panel">
     <div class="flex-row mb-16">
-      <span class="section-title" style="margin-bottom:0">Charts (Last 7 Days)</span>
-      <button class="btn btn-primary" onclick="refreshGraphs()">Refresh All</button>
-      <button class="btn" onclick="App.scheduler.SendWeeklyReport && testReport()">Send Test Report</button>
+      <span class="section-title" style="margin-bottom:0">Graphes (7 derniers jours)</span>
+      <button class="btn btn-primary" onclick="refreshGraphs()">Rafraîchir</button>
+      <button class="btn" onclick="testReport()">Envoyer rapport test</button>
     </div>
     <div class="graphs-grid">
       <div class="graph-card">
-        <div class="graph-card-title">RAM Usage</div>
+        <div class="graph-card-title">RAM</div>
         <div id="graph-ram" class="graph-placeholder"><span class="spinner"></span>Loading...</div>
       </div>
       <div class="graph-card">
-        <div class="graph-card-title">CPU Usage</div>
+        <div class="graph-card-title">CPU</div>
         <div id="graph-cpu" class="graph-placeholder"><span class="spinner"></span>Loading...</div>
       </div>
       <div class="graph-card">
-        <div class="graph-card-title">Disk Usage</div>
+        <div class="graph-card-title">Disque</div>
         <div id="graph-disk" class="graph-placeholder"><span class="spinner"></span>Loading...</div>
       </div>
       <div class="graph-card">
-        <div class="graph-card-title">Network Traffic</div>
+        <div class="graph-card-title">Réseau</div>
         <div id="graph-network" class="graph-placeholder"><span class="spinner"></span>Loading...</div>
       </div>
       <div class="graph-card">
-        <div class="graph-card-title">Docker Memory</div>
+        <div class="graph-card-title">Docker Mémoire</div>
         <div id="graph-docker" class="graph-placeholder"><span class="spinner"></span>Loading...</div>
       </div>
       <div class="graph-card">
-        <div class="graph-card-title">Weekly Comparison</div>
+        <div class="graph-card-title">Comparaison hebdomadaire</div>
         <div id="graph-weekly" class="graph-placeholder"><span class="spinner"></span>Loading...</div>
       </div>
     </div>
   </div>
 
+  <!-- ══════════════════════════════════════════ -->
   <!-- Actions Tab -->
+  <!-- ══════════════════════════════════════════ -->
   <div id="tab-actions" class="tab-panel">
     <div class="flex-row mb-16">
-      <span class="section-title" style="margin-bottom:0">Automated Actions</span>
+      <span class="section-title" style="margin-bottom:0">Actions automatisées</span>
       <button class="btn" onclick="refreshActions()">Refresh</button>
     </div>
     <div class="card actions-table-wrap">
       <table>
         <thead>
           <tr>
-            <th>Time</th>
-            <th>Type</th>
-            <th>Trigger</th>
-            <th>Details</th>
-            <th>Status</th>
+            <th>Heure</th><th>Type</th><th>Déclencheur</th><th>Détails</th><th>Statut</th>
           </tr>
         </thead>
         <tbody id="actions-tbody">
@@ -168,91 +228,267 @@
     </div>
   </div>
 
+  <!-- ══════════════════════════════════════════ -->
   <!-- Config Tab -->
+  <!-- ══════════════════════════════════════════ -->
   <div id="tab-config" class="tab-panel">
     <div class="flex-row mb-16">
       <span class="section-title" style="margin-bottom:0">Configuration</span>
+      <button class="btn btn-primary" onclick="saveFullConfig()">Enregistrer tout</button>
+      <button class="btn" onclick="loadFullConfig()">Réinitialiser</button>
     </div>
 
-    <div class="card config-form">
-      <form id="config-form" onsubmit="saveConfig(event)">
-
-        <div class="form-section">
-          <div class="form-section-title">Thresholds</div>
-          <div class="form-row">
-            <label class="form-label">RAM Alert (%)</label>
-            <input type="number" class="form-input" id="cfg-ram-pct" min="50" max="99" step="0.5">
-          </div>
-          <div class="form-row">
-            <label class="form-label">CPU Alert (%)</label>
-            <input type="number" class="form-input" id="cfg-cpu-pct" min="50" max="99" step="0.5">
-          </div>
-          <div class="form-row">
-            <label class="form-label">CPU Sustained (minutes)</label>
-            <input type="number" class="form-input" id="cfg-cpu-sustained" min="1" max="60">
-          </div>
-          <div class="form-row">
-            <label class="form-label">Disk Alert (%)</label>
-            <input type="number" class="form-input" id="cfg-disk-pct" min="50" max="99" step="0.5">
-          </div>
-          <div class="form-row">
-            <label class="form-label">RAM Cooldown (minutes)</label>
-            <input type="number" class="form-input" id="cfg-ram-cooldown" min="1" max="1440">
-          </div>
-          <div class="form-row">
-            <label class="form-label">CPU Cooldown (minutes)</label>
-            <input type="number" class="form-input" id="cfg-cpu-cooldown" min="1" max="1440">
-          </div>
-          <div class="form-row">
-            <label class="form-label">Disk Cooldown (hours)</label>
-            <input type="number" class="form-input" id="cfg-disk-cooldown" min="1" max="168">
-          </div>
+    <!-- 1. Schedule -->
+    <div class="config-section">
+      <div class="config-section-header" onclick="toggleSection(this)">
+        <span>⏰ Plages d'action (Schedule)</span>
+        <span class="arrow">▼</span>
+      </div>
+      <div class="config-section-body">
+        <div class="form-row">
+          <span class="form-label">Activer les plages horaires</span>
+          <label class="form-toggle">
+            <input type="checkbox" id="cfg-schedule-enabled">
+            <span class="slider"></span>
+          </label>
         </div>
-
-        <div class="form-section">
-          <div class="form-section-title">Docker</div>
-          <div class="form-row">
-            <label class="form-label">Auto-Stop Idle Containers</label>
-            <input type="checkbox" class="form-checkbox" id="cfg-auto-stop">
-          </div>
-          <div class="form-row">
-            <label class="form-label">Idle CPU Threshold (%)</label>
-            <input type="number" class="form-input" id="cfg-idle-cpu" min="0.1" max="10" step="0.1">
-          </div>
-          <div class="form-row">
-            <label class="form-label">Idle Duration (minutes)</label>
-            <input type="number" class="form-input" id="cfg-idle-dur" min="1" max="60">
-          </div>
+        <div class="form-row">
+          <span class="form-label">Fuseau horaire</span>
+          <input type="text" class="form-input" id="cfg-schedule-tz" placeholder="Europe/Paris" style="width:200px">
         </div>
-
-        <div class="form-row mt-16">
-          <button type="submit" class="btn btn-primary">Save Configuration</button>
-          <button type="button" class="btn" onclick="loadConfig()">Reset</button>
-        </div>
-      </form>
-    </div>
-
-    <!-- Docker Stop Order -->
-    <div class="card mt-16">
-      <div class="form-section-title" style="margin-bottom:12px">Docker Stop Order (drag to reorder)</div>
-      <p class="text-muted mb-16">Containers are stopped in this order when RAM is critical. Drag to change priority.</p>
-      <ul id="stop-order-list" class="stop-order-list">
-        <li class="stop-order-empty">No containers in stop order. Add containers below.</li>
-      </ul>
-      <div class="flex-row mt-16">
-        <input type="text" class="form-input" id="new-container-name" placeholder="container-name" style="width:200px">
-        <button class="btn btn-success" onclick="addToStopOrder()">Add</button>
-        <button class="btn btn-primary" onclick="saveStopOrder()">Save Order</button>
+        <div id="schedule-windows-list" style="display:grid;gap:0.5rem;margin-top:0.5rem"></div>
+        <button class="btn btn-success" style="margin-top:0.5rem" onclick="addScheduleWindow()">+ Ajouter une plage</button>
       </div>
     </div>
-  </div>
 
+    <!-- 2. Collection intervals -->
+    <div class="config-section">
+      <div class="config-section-header" onclick="toggleSection(this)">
+        <span>⏱ Intervalles de collecte</span>
+        <span class="arrow">▼</span>
+      </div>
+      <div class="config-section-body">
+        <div class="form-row"><span class="form-label">RAM (s)</span><input type="number" class="form-input" id="cfg-coll-ram" min="1" max="3600"></div>
+        <div class="form-row"><span class="form-label">CPU (s)</span><input type="number" class="form-input" id="cfg-coll-cpu" min="1" max="3600"></div>
+        <div class="form-row"><span class="form-label">Réseau (s)</span><input type="number" class="form-input" id="cfg-coll-net" min="1" max="3600"></div>
+        <div class="form-row"><span class="form-label">Docker (s)</span><input type="number" class="form-input" id="cfg-coll-docker" min="1" max="3600"></div>
+        <div class="form-row"><span class="form-label">Disque (s)</span><input type="number" class="form-input" id="cfg-coll-disk" min="1" max="3600"></div>
+        <div class="form-row"><span class="form-label">Processus (s)</span><input type="number" class="form-input" id="cfg-coll-proc" min="1" max="3600"></div>
+        <div class="form-row"><span class="form-label">Système (s)</span><input type="number" class="form-input" id="cfg-coll-sys" min="1" max="3600"></div>
+      </div>
+    </div>
+
+    <!-- Caps & Actions -->
+    <div class="config-section">
+      <div class="config-section-header" onclick="toggleSection(this)">
+        <span>Caps &amp; Actions</span>
+        <span class="arrow">▼</span>
+      </div>
+      <div class="config-section-body">
+        <p class="text-muted" style="font-size:0.85rem;margin-bottom:0.75rem">Définissez des seuils avec des actions associées (email, docker, shell, webhook).</p>
+        <div id="caps-list" style="display:grid;gap:1rem"></div>
+        <div class="flex-row" style="margin-top:1rem">
+          <button class="btn btn-success" onclick="addCap()">+ Ajouter un cap</button>
+          <button class="btn btn-primary" onclick="saveCaps()">Enregistrer les caps</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3. Thresholds -->
+    <div class="config-section">
+      <div class="config-section-header" onclick="toggleSection(this)">
+        <span>🚨 Seuils d'alerte</span>
+        <span class="arrow">▼</span>
+      </div>
+      <div class="config-section-body">
+        <div class="form-row">
+          <span class="form-label">RAM (%)</span>
+          <input type="range" class="form-range" id="cfg-ram-pct-range" min="50" max="99" step="0.5" oninput="syncInput('cfg-ram-pct-range','cfg-ram-pct')">
+          <input type="number" class="form-input" id="cfg-ram-pct" min="50" max="99" step="0.5" style="width:80px" oninput="syncRange('cfg-ram-pct','cfg-ram-pct-range')">
+        </div>
+        <div class="form-row">
+          <span class="form-label">CPU (%)</span>
+          <input type="range" class="form-range" id="cfg-cpu-pct-range" min="50" max="99" step="0.5" oninput="syncInput('cfg-cpu-pct-range','cfg-cpu-pct')">
+          <input type="number" class="form-input" id="cfg-cpu-pct" min="50" max="99" step="0.5" style="width:80px" oninput="syncRange('cfg-cpu-pct','cfg-cpu-pct-range')">
+        </div>
+        <div class="form-row">
+          <span class="form-label">CPU soutenu (minutes)</span>
+          <input type="number" class="form-input" id="cfg-cpu-sustained" min="1" max="60">
+        </div>
+        <div class="form-row">
+          <span class="form-label">Disque (%)</span>
+          <input type="range" class="form-range" id="cfg-disk-pct-range" min="50" max="99" step="0.5" oninput="syncInput('cfg-disk-pct-range','cfg-disk-pct')">
+          <input type="number" class="form-input" id="cfg-disk-pct" min="50" max="99" step="0.5" style="width:80px" oninput="syncRange('cfg-disk-pct','cfg-disk-pct-range')">
+        </div>
+        <div class="form-row">
+          <span class="form-label">Cooldown RAM (minutes)</span>
+          <input type="number" class="form-input" id="cfg-ram-cooldown" min="1" max="1440">
+        </div>
+        <div class="form-row">
+          <span class="form-label">Cooldown CPU (minutes)</span>
+          <input type="number" class="form-input" id="cfg-cpu-cooldown" min="1" max="1440">
+        </div>
+        <div class="form-row">
+          <span class="form-label">Cooldown Disque (heures)</span>
+          <input type="number" class="form-input" id="cfg-disk-cooldown" min="1" max="168">
+        </div>
+      </div>
+    </div>
+
+    <!-- 4. Docker -->
+    <div class="config-section">
+      <div class="config-section-header" onclick="toggleSection(this)">
+        <span>🐳 Docker</span>
+        <span class="arrow">▼</span>
+      </div>
+      <div class="config-section-body">
+        <div class="form-row">
+          <span class="form-label">Arrêt automatique conteneurs inactifs</span>
+          <label class="form-toggle">
+            <input type="checkbox" id="cfg-auto-stop">
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="form-row">
+          <span class="form-label">Seuil CPU inactif (%)</span>
+          <input type="number" class="form-input" id="cfg-idle-cpu" min="0.1" max="10" step="0.1">
+        </div>
+        <div class="form-row">
+          <span class="form-label">Durée inactivité (minutes)</span>
+          <input type="number" class="form-input" id="cfg-idle-dur" min="1" max="60">
+        </div>
+        <div style="margin-top:0.75rem">
+          <div class="form-label" style="margin-bottom:0.5rem">Ordre d'arrêt (glisser pour réordonner)</div>
+          <p class="text-muted mb-16" style="font-size:0.8rem">Les conteneurs sont arrêtés dans cet ordre en cas de RAM critique.</p>
+          <ul id="stop-order-list" class="stop-order-list">
+            <li class="stop-order-empty">Aucun conteneur dans l'ordre d'arrêt.</li>
+          </ul>
+          <div class="flex-row" style="margin-top:0.75rem">
+            <input type="text" class="form-input" id="new-container-name" placeholder="nom-conteneur" style="width:200px">
+            <button class="btn btn-success" onclick="addToStopOrder()">Ajouter</button>
+            <button class="btn btn-primary" onclick="saveStopOrder()">Sauvegarder l'ordre</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 5. Database -->
+    <div class="config-section">
+      <div class="config-section-header" onclick="toggleSection(this)">
+        <span>🗄 Base de données</span>
+        <span class="arrow">▼</span>
+      </div>
+      <div class="config-section-body">
+        <div class="db-stats-grid" id="db-stats-grid">
+          <div class="db-stat-card"><div class="val" id="db-stat-size">—</div><div class="lbl">Taille fichier</div></div>
+          <div class="db-stat-card"><div class="val" id="db-stat-raw">—</div><div class="lbl">Lignes brutes</div></div>
+          <div class="db-stat-card"><div class="val" id="db-stat-hourly">—</div><div class="lbl">Lignes horaires</div></div>
+          <div class="db-stat-card"><div class="val" id="db-stat-actions">—</div><div class="lbl">Actions</div></div>
+          <div class="db-stat-card"><div class="val" id="db-stat-weekly">—</div><div class="lbl">Résumés hebdo</div></div>
+        </div>
+        <div class="flex-row" style="margin-top:0.75rem">
+          <button class="btn" onclick="loadDBStats()">Rafraîchir les stats</button>
+          <button class="btn btn-danger" onclick="doVacuum()">Vacuum</button>
+          <button class="btn btn-danger" onclick="doCleanup()">Nettoyer maintenant</button>
+        </div>
+        <div class="form-row" style="margin-top:0.75rem">
+          <span class="form-label">TTL brut (heures)</span>
+          <input type="number" class="form-input" id="cfg-db-raw-ttl" min="1" max="720">
+        </div>
+        <div class="form-row">
+          <span class="form-label">TTL horaire (jours)</span>
+          <input type="number" class="form-input" id="cfg-db-hourly-ttl" min="1" max="365">
+        </div>
+        <div class="form-row">
+          <span class="form-label">TTL hebdomadaire (semaines)</span>
+          <input type="number" class="form-input" id="cfg-db-weekly-ttl" min="1" max="260">
+        </div>
+        <div class="form-row">
+          <span class="form-label">Taille max alerte (MB)</span>
+          <input type="number" class="form-input" id="cfg-db-max-size" min="10" max="100000">
+        </div>
+      </div>
+    </div>
+
+    <!-- 6. Notifications -->
+    <div class="config-section">
+      <div class="config-section-header" onclick="toggleSection(this)">
+        <span>📧 Notifications</span>
+        <span class="arrow">▼</span>
+      </div>
+      <div class="config-section-body">
+        <div class="form-row">
+          <span class="form-label">Brevo API Key</span>
+          <div style="position:relative;display:flex;align-items:center;gap:0.5rem">
+            <input type="password" class="form-input" id="cfg-brevo-key" placeholder="(inchangé)" style="width:280px">
+            <button class="btn" style="padding:0.3rem 0.6rem;font-size:0.8rem" onclick="togglePassword('cfg-brevo-key',this)">👁</button>
+          </div>
+        </div>
+        <div class="form-row">
+          <span class="form-label">Email expéditeur</span>
+          <input type="email" class="form-input" id="cfg-brevo-email" style="width:280px">
+        </div>
+        <div class="form-row">
+          <span class="form-label">Nom expéditeur</span>
+          <input type="text" class="form-input" id="cfg-brevo-name" style="width:280px">
+        </div>
+        <div class="form-row">
+          <span class="form-label">Destinataires (virgule)</span>
+          <input type="text" class="form-input" id="cfg-recipients" style="width:360px" placeholder="a@ex.com, b@ex.com">
+        </div>
+        <div class="form-row">
+          <span class="form-label">Rapport hebdo (heure UTC)</span>
+          <input type="number" class="form-input" id="cfg-weekly-hour" min="0" max="23">
+        </div>
+        <div class="form-row">
+          <span class="form-label">Semaines de comparaison</span>
+          <input type="number" class="form-input" id="cfg-weekly-weeks" min="1" max="52">
+        </div>
+        <div class="form-row">
+          <span class="form-label">Inclure graphes dans rapport</span>
+          <label class="form-toggle">
+            <input type="checkbox" id="cfg-weekly-graphs">
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div style="margin-top:0.75rem">
+          <button class="btn btn-primary" onclick="testReport()">Envoyer un rapport test</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 7. Général -->
+    <div class="config-section">
+      <div class="config-section-header" onclick="toggleSection(this)">
+        <span>⚙️ Général</span>
+        <span class="arrow">▼</span>
+      </div>
+      <div class="config-section-body">
+        <div class="form-row">
+          <span class="form-label">Répertoire de logs</span>
+          <input type="text" class="form-input" id="cfg-log-dir" style="width:320px">
+        </div>
+        <div class="form-row">
+          <span class="form-label">Chemin base de données</span>
+          <input type="text" class="form-input" id="cfg-db-path" style="width:320px">
+        </div>
+        <div class="form-row">
+          <span class="form-label">Nombre de top processus</span>
+          <input type="number" class="form-input" id="cfg-top-procs" min="1" max="50">
+        </div>
+      </div>
+    </div>
+
+  </div><!-- tab-config -->
+
+  <!-- ══════════════════════════════════════════ -->
   <!-- Logs Tab -->
+  <!-- ══════════════════════════════════════════ -->
   <div id="tab-logs" class="tab-panel">
     <div class="logs-toolbar">
-      <span class="section-title" style="margin-bottom:0">Log Output</span>
+      <span class="section-title" style="margin-bottom:0">Logs</span>
       <div class="flex-row">
-        <label class="text-muted">Lines:</label>
+        <label class="text-muted">Lignes :</label>
         <input type="number" class="form-input" id="log-lines" value="200" min="10" max="5000" style="width:80px">
         <button class="btn" onclick="refreshLogs()">Refresh</button>
         <label class="text-muted">
@@ -266,6 +502,22 @@
   </div>
 
 </div><!-- .main -->
+
+<!-- Toast container -->
+<div class="toast-container" id="toast-container"></div>
+
+<datalist id="common-metrics">
+  <option value="ram.used_pct">
+  <option value="cpu.total">
+  <option value="cpu.load_1">
+  <option value="cpu.load_5">
+  <option value="cpu.load_15">
+  <option value="disk.root.used_pct">
+  <option value="system.swap_pct">
+  <option value="net.bytes_recv_delta">
+  <option value="net.bytes_sent_delta">
+  <option value="system.open_fds">
+</datalist>
 
 <script src="/static/app.js"></script>
 </body>

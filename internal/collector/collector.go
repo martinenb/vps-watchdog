@@ -30,16 +30,6 @@ type DataPoint struct {
 	Value float64
 }
 
-// ActionRecord represents a logged automated action.
-type ActionRecord struct {
-	ID         int64
-	TS         int64
-	ActionType string
-	Trigger    string
-	Details    string
-	Success    bool
-}
-
 // DockerMetric holds the latest metrics for a Docker container.
 type DockerMetric struct {
 	Name   string

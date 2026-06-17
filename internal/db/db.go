@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"os"
 	"sort"
 	"sync"
 	"time"
@@ -26,8 +27,17 @@ type Metric = collector.Metric
 // DataPoint mirrors collector.DataPoint.
 type DataPoint = collector.DataPoint
 
-// ActionRecord mirrors collector.ActionRecord.
-type ActionRecord = collector.ActionRecord
+// ActionRecord represents a logged automated action.
+type ActionRecord struct {
+	ID         int64  `json:"id"`
+	TS         int64  `json:"ts"`
+	ActionType string `json:"action_type"`
+	Trigger    string `json:"trigger"`
+	Details    string `json:"details"`
+	Success    bool   `json:"success"`
+	DurationMS int64  `json:"duration_ms"`
+	CapName    string `json:"cap_name"`
+}
 
 // DockerMetric mirrors collector.DockerMetric.
 type DockerMetric = collector.DockerMetric
@@ -93,6 +103,14 @@ func New(path string) (*DB, error) {
 	if _, err := sqlDB.Exec(schema); err != nil {
 		return nil, fmt.Errorf("db schema: %w", err)
 	}
+	// Migrate action_log to add duration_ms and cap_name if missing
+	for _, col := range []struct{ name, def string }{
+		{"duration_ms", "INTEGER DEFAULT 0"},
+		{"cap_name", "TEXT DEFAULT ''"},
+	} {
+		_, _ = sqlDB.Exec(fmt.Sprintf("ALTER TABLE action_log ADD COLUMN %s %s", col.name, col.def))
+		// Ignore error — column may already exist
+	}
 	return &DB{db: sqlDB}, nil
 }
 
@@ -136,7 +154,7 @@ func (d *DB) InsertMetrics(metrics []Metric) error {
 }
 
 // InsertAction logs an automated action.
-func (d *DB) InsertAction(actionType, trigger, details string, success bool) error {
+func (d *DB) InsertAction(actionType, trigger, details string, success bool, durationMS int64, capName string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -145,8 +163,8 @@ func (d *DB) InsertAction(actionType, trigger, details string, success bool) err
 		successInt = 1
 	}
 	_, err := d.db.Exec(
-		`INSERT INTO action_log(ts, action_type, trigger, details, success) VALUES(?,?,?,?,?)`,
-		time.Now().Unix(), actionType, trigger, details, successInt,
+		`INSERT INTO action_log(ts, action_type, trigger, details, success, duration_ms, cap_name) VALUES(?,?,?,?,?,?,?)`,
+		time.Now().Unix(), actionType, trigger, details, successInt, durationMS, capName,
 	)
 	return err
 }
@@ -242,7 +260,7 @@ func (d *DB) QueryTopProcesses(limit int) ([]ProcessInfo, error) {
 // QueryActionLog returns the most recent action records.
 func (d *DB) QueryActionLog(limit int) ([]ActionRecord, error) {
 	rows, err := d.db.Query(
-		`SELECT id, ts, action_type, trigger, details, success FROM action_log ORDER BY ts DESC LIMIT ?`, limit,
+		`SELECT id, ts, action_type, trigger, details, success, duration_ms, cap_name FROM action_log ORDER BY ts DESC LIMIT ?`, limit,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("QueryActionLog: %w", err)
@@ -253,13 +271,35 @@ func (d *DB) QueryActionLog(limit int) ([]ActionRecord, error) {
 	for rows.Next() {
 		var r ActionRecord
 		var successInt int
-		if err := rows.Scan(&r.ID, &r.TS, &r.ActionType, &r.Trigger, &r.Details, &successInt); err != nil {
+		if err := rows.Scan(&r.ID, &r.TS, &r.ActionType, &r.Trigger, &r.Details, &successInt, &r.DurationMS, &r.CapName); err != nil {
 			return nil, err
 		}
 		r.Success = successInt == 1
 		records = append(records, r)
 	}
 	return records, rows.Err()
+}
+
+// QueryActionDurations returns (ts, duration_ms) for successful actions in a time range.
+func (d *DB) QueryActionDurations(startTS, endTS int64) ([]DataPoint, error) {
+	rows, err := d.db.Query(
+		`SELECT ts, duration_ms FROM action_log WHERE ts >= ? AND ts <= ? AND success = 1 ORDER BY ts`,
+		startTS, endTS,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("QueryActionDurations: %w", err)
+	}
+	defer rows.Close()
+
+	var points []DataPoint
+	for rows.Next() {
+		var dp DataPoint
+		if err := rows.Scan(&dp.TS, &dp.Value); err != nil {
+			return nil, err
+		}
+		points = append(points, dp)
+	}
+	return points, rows.Err()
 }
 
 // RollupHour aggregates raw metrics for a given hour timestamp into metrics_hourly,
@@ -348,14 +388,99 @@ func (d *DB) RollupHour(hourTS int64) error {
 	return nil
 }
 
-// CleanupOld removes hourly metrics older than 90 days.
+// CleanupOld removes old metrics using default TTL values (backward compat).
 func (d *DB) CleanupOld() error {
+	return d.CleanupWithTTL(48, 90, 52)
+}
+
+// CleanupWithTTL deletes old data using configurable TTL values.
+func (d *DB) CleanupWithTTL(rawTTLHours, hourlyTTLDays, weeklyTTLWeeks int) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	now := time.Now().Unix()
+	rawCutoff := now - int64(rawTTLHours)*3600
+	hourlyCutoff := now - int64(hourlyTTLDays)*86400
+	weeklyCutoff := now - int64(weeklyTTLWeeks)*7*86400
+	_, err1 := d.db.Exec("DELETE FROM metrics_raw WHERE ts < ?", rawCutoff)
+	_, err2 := d.db.Exec("DELETE FROM metrics_hourly WHERE hour_ts < ?", hourlyCutoff)
+	_, err3 := d.db.Exec("DELETE FROM weekly_summary WHERE week_ts < ?", weeklyCutoff)
+	if err1 != nil {
+		return err1
+	}
+	if err2 != nil {
+		return err2
+	}
+	return err3
+}
 
-	cutoff := time.Now().Unix() - 90*24*3600
-	_, err := d.db.Exec(`DELETE FROM metrics_hourly WHERE hour_ts < ?`, cutoff)
+// DBStats returns statistics about the database.
+type DBStats struct {
+	FileSizeBytes int64  `json:"file_size_bytes"`
+	RawRows       int64  `json:"raw_rows"`
+	HourlyRows    int64  `json:"hourly_rows"`
+	ActionRows    int64  `json:"action_rows"`
+	WeeklyRows    int64  `json:"weekly_rows"`
+	OldestRawTS   int64  `json:"oldest_raw_ts"`
+	NewestRawTS   int64  `json:"newest_raw_ts"`
+	DBPath        string `json:"db_path"`
+}
+
+func (d *DB) Stats(dbPath string) (*DBStats, error) {
+	stats := &DBStats{DBPath: dbPath}
+
+	// File size
+	if fi, err := os.Stat(dbPath); err == nil {
+		stats.FileSizeBytes = fi.Size()
+	}
+
+	// Row counts
+	queries := []struct {
+		dest  *int64
+		query string
+	}{
+		{&stats.RawRows, "SELECT COUNT(*) FROM metrics_raw"},
+		{&stats.HourlyRows, "SELECT COUNT(*) FROM metrics_hourly"},
+		{&stats.ActionRows, "SELECT COUNT(*) FROM action_log"},
+		{&stats.WeeklyRows, "SELECT COUNT(*) FROM weekly_summary"},
+	}
+	for _, q := range queries {
+		row := d.db.QueryRow(q.query)
+		row.Scan(q.dest)
+	}
+
+	// Oldest/newest raw
+	d.db.QueryRow("SELECT MIN(ts), MAX(ts) FROM metrics_raw").Scan(&stats.OldestRawTS, &stats.NewestRawTS)
+
+	return stats, nil
+}
+
+func (d *DB) Vacuum() error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	_, err := d.db.Exec("VACUUM")
 	return err
+}
+
+// QueryMetricNames returns all distinct metric names in the database.
+func (d *DB) QueryMetricNames() ([]string, error) {
+	rows, err := d.db.Query(`
+		SELECT DISTINCT name FROM metrics_hourly
+		UNION
+		SELECT DISTINCT name FROM metrics_raw
+		ORDER BY name
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var names []string
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err == nil {
+			names = append(names, n)
+		}
+	}
+	return names, nil
 }
 
 // ComputeWeeklySummary aggregates hourly metrics for the given week start timestamp.

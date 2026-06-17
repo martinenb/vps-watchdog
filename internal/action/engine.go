@@ -12,286 +12,168 @@ import (
 	"vps-watchdog/internal/db"
 )
 
-// BrevoSender is the interface required by the engine to send email alerts.
-type BrevoSender interface {
-	Send(subject, htmlBody string, attachments []interface{}) error
-}
-
-// Engine evaluates collected metrics and triggers automated actions.
-type Engine struct {
-	cfg      *config.Config
-	db       *db.DB
-	cooldown *CooldownRegistry
-	brevo    EmailSender
-	cpuBuf   []float64
-	cpuBufSz int
-	mu       sync.Mutex
-}
-
 // EmailSender is a minimal interface for sending alert emails.
 type EmailSender interface {
 	SendAlert(subject, body string) error
 }
 
-// New creates a new Engine.
+// Engine evaluates collected metrics against configured caps and triggers actions.
+type Engine struct {
+	db       *db.DB
+	cooldown *CooldownRegistry
+	brevo    EmailSender
+	mu       sync.Mutex
+}
+
 func New(cfg *config.Config, database *db.DB, emailSender EmailSender) *Engine {
 	return &Engine{
-		cfg:      cfg,
 		db:       database,
 		cooldown: NewCooldownRegistry(),
 		brevo:    emailSender,
 	}
 }
 
-// UpdateConfig replaces the config reference (called on SIGHUP reload).
 func (e *Engine) UpdateConfig(cfg *config.Config) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.cfg = cfg
-	// Resize CPU buffer.
-	e.cpuBuf = nil
-	e.cpuBufSz = 0
+	// No-op: config is read fresh from config.Get() on each Evaluate call.
 }
 
-// Evaluate inspects the latest metrics slice and triggers actions as needed.
+// Evaluate inspects the latest metrics against all configured caps.
 func (e *Engine) Evaluate(metrics []collector.Metric) {
-	e.mu.Lock()
-	cfg := e.cfg
-	e.mu.Unlock()
+	cfg := config.Get()
 
-	metricMap := make(map[string]collector.Metric, len(metrics))
+	// Build a snapshot map: name → value.
+	snapshot := make(map[string]float64, len(metrics))
 	for _, m := range metrics {
-		metricMap[m.Name] = m
+		snapshot[m.Name] = m.Value
 	}
 
-	e.checkRAM(cfg, metricMap, metrics)
-	e.checkCPU(cfg, metricMap)
-	e.checkDisk(cfg, metricMap)
-}
-
-func (e *Engine) checkRAM(cfg *config.Config, metricMap map[string]collector.Metric, allMetrics []collector.Metric) {
-	ramMetric, ok := metricMap["ram.used_pct"]
-	if !ok {
-		return
-	}
-	if ramMetric.Value <= cfg.Thresholds.RAMPCT {
-		return
-	}
-
-	cooldownKey := "ram_alert"
-	cooldownDuration := time.Duration(cfg.Thresholds.RAMAlertCooldownMinutes) * time.Minute
-	if !e.cooldown.Allow(cooldownKey, cooldownDuration) {
-		return
-	}
-
-	log.Printf("engine: RAM threshold exceeded: %.1f%% > %.1f%%", ramMetric.Value, cfg.Thresholds.RAMPCT)
-
-	// Collect process metrics for candidates.
-	type procInfo struct {
-		name        string
-		containerID string
-		rss         float64
-	}
-	var processes []procInfo
-	for _, m := range allMetrics {
-		if !strings.HasPrefix(m.Name, "ram.proc.") {
+	for _, cap := range cfg.Caps {
+		if !cap.Enabled {
 			continue
 		}
-		pi := procInfo{rss: m.Value}
-		if m.Tags != nil {
-			pi.name = m.Tags["name"]
-			pi.containerID = m.Tags["container_id"]
-		}
-		processes = append(processes, pi)
-	}
-
-	var actions []string
-	var topProcs []string
-	for _, p := range processes {
-		topProcs = append(topProcs, fmt.Sprintf("%s (RSS: %.0f MB)", p.name, p.rss/1e6))
-	}
-
-	if cfg.Docker.AutoStop && len(processes) > 0 {
-		// Build a set from stop_order for prioritisation.
-		orderIndex := map[string]int{}
-		for i, name := range cfg.Docker.StopOrder {
-			orderIndex[name] = i
-		}
-
-		// Collect containers that are idle.
-		idleDuration := time.Duration(cfg.Docker.IdleDurationMinutes) * time.Minute
-		type candidate struct {
-			containerID string
-			orderIdx    int
-		}
-		seen := map[string]bool{}
-		var candidates []candidate
-
-		for _, p := range processes {
-			if p.containerID == "" || seen[p.containerID] {
-				continue
-			}
-			seen[p.containerID] = true
-
-			idle, err := e.db.IsContainerIdle(p.containerID, cfg.Docker.IdleCPUPct, idleDuration)
-			if err != nil {
-				log.Printf("engine: IsContainerIdle %s: %v", p.containerID, err)
-				continue
-			}
-			if !idle {
-				continue
-			}
-
-			idx, ordered := orderIndex[p.containerID]
-			if !ordered {
-				idx = 9999 // stop ordered containers first
-			}
-			candidates = append(candidates, candidate{containerID: p.containerID, orderIdx: idx})
-		}
-
-		// Sort by stop_order priority.
-		for i := 0; i < len(candidates); i++ {
-			for j := i + 1; j < len(candidates); j++ {
-				if candidates[j].orderIdx < candidates[i].orderIdx {
-					candidates[i], candidates[j] = candidates[j], candidates[i]
-				}
-			}
-		}
-
-		for _, c := range candidates {
-			reason := fmt.Sprintf("RAM %.1f%% > %.1f%% threshold", ramMetric.Value, cfg.Thresholds.RAMPCT)
-			success, err := StopContainer(c.containerID, reason, e.db)
-			if err != nil {
-				log.Printf("engine: StopContainer %s: %v", c.containerID, err)
-			}
-			if success {
-				actions = append(actions, fmt.Sprintf("Stopped container %s (idle, RAM relief)", c.containerID))
-			}
-		}
-	}
-
-	// Send email alert.
-	subject := fmt.Sprintf("[VPS Watchdog] RAM Alert: %.1f%% used", ramMetric.Value)
-	body := buildAlertBody("RAM", ramMetric.Value, cfg.Thresholds.RAMPCT, actions, topProcs)
-	if err := e.brevo.SendAlert(subject, body); err != nil {
-		log.Printf("engine: send RAM alert: %v", err)
+		e.evaluateCap(cap, snapshot)
 	}
 }
 
-func (e *Engine) checkCPU(cfg *config.Config, metricMap map[string]collector.Metric) {
-	cpuMetric, ok := metricMap["cpu.total"]
+func (e *Engine) evaluateCap(cap config.Cap, snapshot map[string]float64) {
+	value, ok := snapshot[cap.Metric]
 	if !ok {
 		return
 	}
 
-	e.mu.Lock()
-	// Compute buffer size based on sustained minutes and collection interval.
-	intervalSec := cfg.General.IntervalSeconds
-	if intervalSec <= 0 {
-		intervalSec = 30
+	// Evaluate operator
+	triggered := false
+	switch cap.Operator {
+	case ">":
+		triggered = value > cap.Threshold
+	case ">=":
+		triggered = value >= cap.Threshold
+	case "<":
+		triggered = value < cap.Threshold
+	case "<=":
+		triggered = value <= cap.Threshold
+	case "==":
+		triggered = value == cap.Threshold
+	default:
+		triggered = value > cap.Threshold
 	}
-	needed := cfg.Thresholds.CPUSustainedMinutes * 60 / intervalSec
-	if needed < 1 {
-		needed = 1
-	}
-	if e.cpuBufSz != needed {
-		e.cpuBuf = make([]float64, 0, needed)
-		e.cpuBufSz = needed
-	}
-	e.cpuBuf = append(e.cpuBuf, cpuMetric.Value)
-	if len(e.cpuBuf) > needed {
-		e.cpuBuf = e.cpuBuf[len(e.cpuBuf)-needed:]
-	}
-	buf := make([]float64, len(e.cpuBuf))
-	copy(buf, e.cpuBuf)
-	e.mu.Unlock()
 
-	// Only alert once the buffer is full.
-	if len(buf) < needed {
+	if !triggered {
 		return
 	}
 
-	// Check if all values exceed the threshold.
-	for _, v := range buf {
-		if v < cfg.Thresholds.CPUPCT {
-			return
-		}
+	// Check cooldown
+	cooldownKey := "cap_" + cap.Name
+	cooldownDur := time.Duration(cap.CooldownMinutes) * time.Minute
+	if cooldownDur == 0 {
+		cooldownDur = 30 * time.Minute
 	}
-
-	cooldownKey := "cpu_alert"
-	cooldownDuration := time.Duration(cfg.Thresholds.CPUAlertCooldownMinutes) * time.Minute
-	if !e.cooldown.Allow(cooldownKey, cooldownDuration) {
+	if !e.cooldown.Allow(cooldownKey, cooldownDur) {
 		return
 	}
 
-	log.Printf("engine: sustained CPU threshold exceeded: %.1f%% for %d minutes",
-		cpuMetric.Value, cfg.Thresholds.CPUSustainedMinutes)
-
-	details := fmt.Sprintf("cpu_pct=%.1f threshold=%.1f sustained_minutes=%d",
-		cpuMetric.Value, cfg.Thresholds.CPUPCT, cfg.Thresholds.CPUSustainedMinutes)
-	if err := e.db.InsertAction("cpu_alert", fmt.Sprintf("cpu.total > %.1f%% for %dm", cfg.Thresholds.CPUPCT, cfg.Thresholds.CPUSustainedMinutes), details, true); err != nil {
-		log.Printf("engine: insert CPU action: %v", err)
+	// Check schedule window
+	if cap.RespectSchedule && !e.isActionAllowed() {
+		log.Printf("engine: cap %q triggered but outside schedule window (value=%.2f)", cap.Name, value)
+		return
 	}
 
-	subject := fmt.Sprintf("[VPS Watchdog] CPU Alert: %.1f%% for %d minutes", cpuMetric.Value, cfg.Thresholds.CPUSustainedMinutes)
-	body := buildAlertBody("CPU", cpuMetric.Value, cfg.Thresholds.CPUPCT, nil, nil)
-	if err := e.brevo.SendAlert(subject, body); err != nil {
-		log.Printf("engine: send CPU alert: %v", err)
+	log.Printf("engine: cap %q triggered: %s %.2f %s %.2f",
+		cap.Name, cap.Metric, value, cap.Operator, cap.Threshold)
+
+	// Execute each action
+	for _, a := range cap.Actions {
+		if a.Type == "email" {
+			subject := strings.ReplaceAll(a.Subject, "{value}", fmt.Sprintf("%.1f", value))
+			subject = strings.ReplaceAll(subject, "{metric}", cap.Metric)
+			if subject == "" {
+				subject = fmt.Sprintf("[VPS Watchdog] %s: %s %.1f %s %.1f", cap.Name, cap.Metric, value, cap.Operator, cap.Threshold)
+			}
+			body := buildAlertBody(cap.Name, cap.Metric, value, cap.Threshold, cap.Operator)
+			start := time.Now()
+			err := e.brevo.SendAlert(subject, body)
+			durationMS := time.Since(start).Milliseconds()
+			success := err == nil
+			if err != nil {
+				log.Printf("engine: cap %q email action failed: %v", cap.Name, err)
+			}
+			_ = e.db.InsertAction("email", fmt.Sprintf("%s %s %.2f", cap.Metric, cap.Operator, cap.Threshold),
+				"subject="+subject, success, durationMS, cap.Name)
+			continue
+		}
+
+		success, durationMS, details, err := ExecuteAction(a, value, cap.Metric, e.db)
+		if err != nil {
+			log.Printf("engine: cap %q action %s failed: %v", cap.Name, a.Type, err)
+		}
+		_ = e.db.InsertAction(a.Type, fmt.Sprintf("cap=%s metric=%s value=%.2f", cap.Name, cap.Metric, value),
+			details, success, durationMS, cap.Name)
 	}
 }
 
-func (e *Engine) checkDisk(cfg *config.Config, metricMap map[string]collector.Metric) {
-	for name, m := range metricMap {
-		if !strings.HasSuffix(name, ".used_pct") || !strings.HasPrefix(name, "disk.") {
+func (e *Engine) isActionAllowed() bool {
+	cfg := config.Get()
+	if !cfg.Schedule.Enabled || len(cfg.Schedule.Windows) == 0 {
+		return true
+	}
+
+	loc, err := time.LoadLocation(cfg.Schedule.Timezone)
+	if err != nil {
+		log.Printf("engine: invalid timezone %q: %v, using UTC", cfg.Schedule.Timezone, err)
+		loc = time.UTC
+	}
+
+	now := time.Now().In(loc)
+	dayNames := []string{"sun", "mon", "tue", "wed", "thu", "fri", "sat"}
+	dayName := dayNames[now.Weekday()]
+	currentMinutes := now.Hour()*60 + now.Minute()
+
+	for _, w := range cfg.Schedule.Windows {
+		dayMatch := false
+		for _, d := range w.Days {
+			if d == "*" || d == dayName {
+				dayMatch = true
+				break
+			}
+		}
+		if !dayMatch {
 			continue
 		}
-		if m.Value <= cfg.Thresholds.DiskPCT {
-			continue
-		}
-
-		cooldownKey := "disk_alert_" + name
-		cooldownDuration := time.Duration(cfg.Thresholds.DiskAlertCooldownHours) * time.Hour
-		if !e.cooldown.Allow(cooldownKey, cooldownDuration) {
-			continue
-		}
-
-		log.Printf("engine: disk threshold exceeded on %s: %.1f%% > %.1f%%", name, m.Value, cfg.Thresholds.DiskPCT)
-
-		// Extract mount from metric name.
-		mount := strings.TrimSuffix(strings.TrimPrefix(name, "disk."), ".used_pct")
-
-		// Get top directories from DB for that mount (tags matching the path).
-		topDirs := []string{"(run disk walk for details)"}
-
-		if err := LogDiskAlert(mount, m.Value, topDirs, e.db); err != nil {
-			log.Printf("engine: LogDiskAlert: %v", err)
-		}
-
-		subject := fmt.Sprintf("[VPS Watchdog] Disk Alert: %s at %.1f%%", mount, m.Value)
-		body := buildAlertBody("DISK", m.Value, cfg.Thresholds.DiskPCT, nil, topDirs)
-		if err := e.brevo.SendAlert(subject, body); err != nil {
-			log.Printf("engine: send disk alert: %v", err)
+		var startH, startM, endH, endM int
+		fmt.Sscanf(w.Start, "%d:%d", &startH, &startM)
+		fmt.Sscanf(w.End, "%d:%d", &endH, &endM)
+		if currentMinutes >= startH*60+startM && currentMinutes < endH*60+endM {
+			return true
 		}
 	}
+	return false
 }
 
-func buildAlertBody(alertType string, triggerValue, threshold float64, actions, topProcs []string) string {
-	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("<h2>%s Alert</h2>", alertType))
-	sb.WriteString(fmt.Sprintf("<p>Current value: <strong>%.1f%%</strong> (threshold: %.1f%%)</p>", triggerValue, threshold))
-	if len(actions) > 0 {
-		sb.WriteString("<h3>Actions Taken</h3><ul>")
-		for _, a := range actions {
-			sb.WriteString("<li>" + a + "</li>")
-		}
-		sb.WriteString("</ul>")
-	}
-	if len(topProcs) > 0 {
-		sb.WriteString("<h3>Top Processes</h3><ul>")
-		for _, p := range topProcs {
-			sb.WriteString("<li>" + p + "</li>")
-		}
-		sb.WriteString("</ul>")
-	}
-	return sb.String()
+func buildAlertBody(capName, metric string, value, threshold float64, operator string) string {
+	return fmt.Sprintf(`<h2>%s</h2>
+<p>Metric: <strong>%s</strong></p>
+<p>Current value: <strong>%.2f</strong> (threshold: %s %.2f)</p>
+<p>Time: %s</p>`,
+		capName, metric, value, operator, threshold,
+		time.Now().Format("2006-01-02 15:04:05 UTC"))
 }

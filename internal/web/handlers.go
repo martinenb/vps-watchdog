@@ -42,6 +42,14 @@ func (s *Server) buildRoutes() http.Handler {
 	protected.HandleFunc("/api/logs", s.handleLogs)
 	protected.HandleFunc("/api/graphs/", s.handleGraphs)
 	protected.HandleFunc("/api/report/test", s.handleReportTest)
+	protected.HandleFunc("/api/db/stats", s.handleDBStats)
+	protected.HandleFunc("/api/db/vacuum", s.handleDBVacuum)
+	protected.HandleFunc("/api/db/cleanup", s.handleDBCleanup)
+	protected.HandleFunc("/api/metrics/names", s.handleMetricNames)
+	protected.HandleFunc("/api/metrics/query", s.handleMetricsQuery)
+	protected.HandleFunc("/api/config/full", s.handleConfigFull)
+	protected.HandleFunc("/api/caps", s.handleCaps)
+	protected.HandleFunc("/api/metrics/action-durations", s.handleActionDurations)
 
 	mux.Handle("/", s.basicAuth(protected))
 	return mux
@@ -475,4 +483,271 @@ func writeConfig(path string, cfg *config.Config) error {
 	}
 	defer f.Close()
 	return toml.NewEncoder(f).Encode(cfg)
+}
+
+func (s *Server) handleDBStats(w http.ResponseWriter, r *http.Request) {
+	stats, err := s.db.Stats(s.cfg.General.DBPath)
+	if err != nil {
+		http.Error(w, "error", 500)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(stats)
+}
+
+func (s *Server) handleDBVacuum(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", 405)
+		return
+	}
+	if err := s.db.Vacuum(); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(`{"ok":true}`))
+}
+
+func (s *Server) handleDBCleanup(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", 405)
+		return
+	}
+	cfg := config.Get()
+	if err := s.db.CleanupWithTTL(cfg.Database.RawTTLHours, cfg.Database.HourlyTTLDays, cfg.Database.WeeklyTTLWeeks); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(`{"ok":true}`))
+}
+
+func (s *Server) handleMetricNames(w http.ResponseWriter, r *http.Request) {
+	names, err := s.db.QueryMetricNames()
+	if err != nil {
+		http.Error(w, "error", 500)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(names)
+}
+
+func (s *Server) handleMetricsQuery(w http.ResponseWriter, r *http.Request) {
+	name := r.URL.Query().Get("name")
+	if name == "" {
+		http.Error(w, "name required", 400)
+		return
+	}
+	fromStr := r.URL.Query().Get("from")
+	toStr := r.URL.Query().Get("to")
+	granularity := r.URL.Query().Get("granularity") // "raw" or "hourly"
+
+	now := time.Now().Unix()
+	fromTS := now - 86400 // default 24h
+	toTS := now
+
+	if fromStr != "" {
+		if v, err := strconv.ParseInt(fromStr, 10, 64); err == nil {
+			fromTS = v
+		}
+	}
+	if toStr != "" {
+		if v, err := strconv.ParseInt(toStr, 10, 64); err == nil {
+			toTS = v
+		}
+	}
+
+	useHourly := granularity != "raw"
+	if toTS-fromTS <= 7200 { // < 2h → use raw
+		useHourly = false
+	}
+
+	points, err := s.db.QueryRange(name, fromTS, toTS, useHourly)
+	if err != nil {
+		http.Error(w, "error", 500)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(points)
+}
+
+// handleConfigFull handles GET/POST for the complete config (all sections).
+func (s *Server) handleConfigFull(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		cfg := config.Get()
+		// Return full config, redacting secrets
+		type safeConfig struct {
+			General    config.GeneralConfig    `json:"general"`
+			Schedule   config.ScheduleConfig   `json:"schedule"`
+			Collection config.CollectionConfig `json:"collection"`
+			Thresholds config.ThresholdConfig  `json:"thresholds"`
+			Docker     config.DockerConfig     `json:"docker"`
+			Brevo      struct {
+				SenderEmail string `json:"sender_email"`
+				SenderName  string `json:"sender_name"`
+				HasAPIKey   bool   `json:"has_api_key"`
+			} `json:"brevo"`
+			Recipients config.RecipientsConfig `json:"recipients"`
+			Weekly     config.WeeklyConfig     `json:"weekly"`
+			DiskWalk   config.DiskWalkConfig   `json:"disk_walk"`
+			Database   config.DBConfig         `json:"database"`
+			Web        struct {
+				Port    int  `json:"port"`
+				Enabled bool `json:"enabled"`
+			} `json:"web"`
+		}
+		sc := safeConfig{
+			General:    cfg.General,
+			Schedule:   cfg.Schedule,
+			Collection: cfg.Collection,
+			Thresholds: cfg.Thresholds,
+			Docker:     cfg.Docker,
+			Recipients: cfg.Recipients,
+			Weekly:     cfg.Weekly,
+			DiskWalk:   cfg.DiskWalk,
+			Database:   cfg.Database,
+		}
+		sc.Brevo.SenderEmail = cfg.Brevo.SenderEmail
+		sc.Brevo.SenderName = cfg.Brevo.SenderName
+		sc.Brevo.HasAPIKey = cfg.Brevo.APIKey != "" && cfg.Brevo.APIKey != "YOUR_BREVO_API_KEY"
+		sc.Web.Port = cfg.Web.Port
+		sc.Web.Enabled = cfg.Web.Enabled
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(sc)
+
+	case http.MethodPost:
+		var updates map[string]json.RawMessage
+		if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
+			http.Error(w, "invalid JSON", 400)
+			return
+		}
+		cfgPath := config.GetPath()
+		cfg, err := config.Load(cfgPath)
+		if err != nil {
+			http.Error(w, "could not load config", 500)
+			return
+		}
+
+		// Apply updates per section
+		if raw, ok := updates["schedule"]; ok {
+			json.Unmarshal(raw, &cfg.Schedule)
+		}
+		if raw, ok := updates["collection"]; ok {
+			json.Unmarshal(raw, &cfg.Collection)
+		}
+		if raw, ok := updates["thresholds"]; ok {
+			json.Unmarshal(raw, &cfg.Thresholds)
+		}
+		if raw, ok := updates["docker"]; ok {
+			// Partial update — don't overwrite stop_order unless explicitly provided
+			var dUpdate map[string]json.RawMessage
+			if json.Unmarshal(raw, &dUpdate) == nil {
+				if v, ok := dUpdate["auto_stop"]; ok {
+					json.Unmarshal(v, &cfg.Docker.AutoStop)
+				}
+				if v, ok := dUpdate["idle_cpu_pct"]; ok {
+					json.Unmarshal(v, &cfg.Docker.IdleCPUPct)
+				}
+				if v, ok := dUpdate["idle_duration_minutes"]; ok {
+					json.Unmarshal(v, &cfg.Docker.IdleDurationMinutes)
+				}
+				if v, ok := dUpdate["stop_order"]; ok {
+					json.Unmarshal(v, &cfg.Docker.StopOrder)
+				}
+			}
+		}
+		if raw, ok := updates["recipients"]; ok {
+			json.Unmarshal(raw, &cfg.Recipients)
+		}
+		if raw, ok := updates["weekly"]; ok {
+			json.Unmarshal(raw, &cfg.Weekly)
+		}
+		if raw, ok := updates["disk_walk"]; ok {
+			json.Unmarshal(raw, &cfg.DiskWalk)
+		}
+		if raw, ok := updates["database"]; ok {
+			json.Unmarshal(raw, &cfg.Database)
+		}
+		if raw, ok := updates["brevo"]; ok {
+			var bUpdate map[string]string
+			if json.Unmarshal(raw, &bUpdate) == nil {
+				if v, ok := bUpdate["api_key"]; ok && v != "" && v != "[REDACTED]" {
+					cfg.Brevo.APIKey = v
+				}
+				if v, ok := bUpdate["sender_email"]; ok {
+					cfg.Brevo.SenderEmail = v
+				}
+				if v, ok := bUpdate["sender_name"]; ok {
+					cfg.Brevo.SenderName = v
+				}
+			}
+		}
+
+		if raw, ok := updates["caps"]; ok {
+			json.Unmarshal(raw, &cfg.Caps)
+		}
+
+		if err := writeConfig(cfgPath, cfg); err != nil {
+			http.Error(w, "could not save config", 500)
+			return
+		}
+		config.Reload(cfgPath)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"ok":true}`))
+	default:
+		http.Error(w, "method not allowed", 405)
+	}
+}
+
+// handleCaps handles GET (list caps) and POST (save caps to config).
+func (s *Server) handleCaps(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		cfg := config.Get()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(cfg.Caps)
+	case http.MethodPost:
+		var caps []config.Cap
+		if err := json.NewDecoder(r.Body).Decode(&caps); err != nil {
+			http.Error(w, "invalid JSON", 400)
+			return
+		}
+		cfgPath := config.GetPath()
+		cfg, err := config.Load(cfgPath)
+		if err != nil {
+			http.Error(w, "could not load config", 500)
+			return
+		}
+		cfg.Caps = caps
+		if err := writeConfig(cfgPath, cfg); err != nil {
+			http.Error(w, "could not save", 500)
+			return
+		}
+		config.Reload(cfgPath)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"ok":true}`))
+	default:
+		http.Error(w, "method not allowed", 405)
+	}
+}
+
+// handleActionDurations returns action execution times for graphing.
+func (s *Server) handleActionDurations(w http.ResponseWriter, r *http.Request) {
+	hoursStr := r.URL.Query().Get("hours")
+	hours := 168
+	if hoursStr != "" {
+		if h, err := strconv.Atoi(hoursStr); err == nil && h > 0 {
+			hours = h
+		}
+	}
+	endTS := time.Now().Unix()
+	startTS := endTS - int64(hours)*3600
+	points, err := s.db.QueryActionDurations(startTS, endTS)
+	if err != nil {
+		http.Error(w, "error", 500)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(points)
 }

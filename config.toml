@@ -1,9 +1,90 @@
 [general]
-interval_seconds = 30
 log_dir = "/var/log/watchdog"
 db_path = "/var/lib/watchdog/metrics.db"
 top_processes_n = 10
 
+[schedule]
+enabled = false
+timezone = "Europe/Paris"
+
+  [[schedule.windows]]
+  days = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+  start = "07:00"
+  end = "22:00"
+
+[collection]
+ram_interval_s = 5
+cpu_interval_s = 5
+network_interval_s = 5
+docker_interval_s = 15
+disk_interval_s = 60
+process_interval_s = 30
+system_interval_s = 30
+
+# ── Caps: define threshold levels and associated actions ──────────────────────
+
+[[caps]]
+name = "RAM Alerte"
+description = "Alerte email quand la RAM dépasse 75%"
+metric = "ram.used_pct"
+operator = ">"
+threshold = 75.0
+cooldown_minutes = 60
+respect_schedule = true
+enabled = true
+
+  [[caps.action]]
+  type = "email"
+  subject = "[Watchdog] RAM à {value}% sur votre VPS"
+
+[[caps]]
+name = "RAM Critique"
+description = "Stop les containers Docker idle quand la RAM dépasse 85%"
+metric = "ram.used_pct"
+operator = ">"
+threshold = 85.0
+cooldown_minutes = 120
+respect_schedule = true
+enabled = true
+
+  [[caps.action]]
+  type = "docker_stop_idle"
+  idle_cpu_pct = 0.5
+  idle_minutes = 10
+
+  [[caps.action]]
+  type = "email"
+  subject = "[Watchdog] RAM Critique: {value}% — containers stoppés"
+
+[[caps]]
+name = "CPU Soutenu"
+description = "Alerte si le CPU dépasse 90% pendant plusieurs cycles"
+metric = "cpu.total"
+operator = ">"
+threshold = 90.0
+cooldown_minutes = 30
+respect_schedule = false
+enabled = true
+
+  [[caps.action]]
+  type = "email"
+  subject = "[Watchdog] CPU élevé: {value}%"
+
+[[caps]]
+name = "Disque Root Critique"
+description = "Alerte quand le disque root dépasse 90%"
+metric = "disk.root.used_pct"
+operator = ">"
+threshold = 90.0
+cooldown_minutes = 360
+respect_schedule = false
+enabled = true
+
+  [[caps.action]]
+  type = "email"
+  subject = "[Watchdog] Disque plein: {value}%"
+
+# ── Legacy thresholds (kept for backward compat) ─────────────────────────────
 [thresholds]
 ram_pct = 85.0
 cpu_pct = 90.0
@@ -36,6 +117,12 @@ weeks_comparison = 4
 paths = ["/", "/home", "/var"]
 max_depth = 4
 top_dirs_n = 15
+
+[database]
+raw_ttl_hours = 48
+hourly_ttl_days = 90
+weekly_ttl_weeks = 52
+max_size_mb = 500
 
 [web]
 port = 47832

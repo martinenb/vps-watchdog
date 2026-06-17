@@ -6,16 +6,51 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-// Config is the top-level configuration structure.
 type Config struct {
 	General    GeneralConfig    `toml:"general"`
+	Schedule   ScheduleConfig   `toml:"schedule"`
+	Collection CollectionConfig `toml:"collection"`
 	Thresholds ThresholdConfig  `toml:"thresholds"`
 	Docker     DockerConfig     `toml:"docker"`
 	Brevo      BrevoConfig      `toml:"brevo"`
 	Recipients RecipientsConfig `toml:"recipients"`
 	Weekly     WeeklyConfig     `toml:"weekly"`
 	DiskWalk   DiskWalkConfig   `toml:"disk_walk"`
+	Database   DBConfig         `toml:"database"`
 	Web        WebConfig        `toml:"web"`
+	Caps       []Cap            `toml:"caps"`
+}
+
+// Cap defines a threshold level with associated actions.
+type Cap struct {
+	Name            string      `toml:"name"`
+	Description     string      `toml:"description"`
+	Metric          string      `toml:"metric"`   // e.g. "ram.used_pct", "cpu.total", "disk.root.used_pct"
+	Operator        string      `toml:"operator"` // ">", "<", ">=", "<=", "=="
+	Threshold       float64     `toml:"threshold"`
+	CooldownMinutes int         `toml:"cooldown_minutes"`
+	RespectSchedule bool        `toml:"respect_schedule"`
+	Enabled         bool        `toml:"enabled"`
+	Actions         []CapAction `toml:"action"`
+}
+
+// CapAction defines what to do when a cap is triggered.
+type CapAction struct {
+	Type string `toml:"type"`
+	// docker_stop / docker_restart: specify a container name
+	Container string `toml:"container"`
+	// docker_stop_idle: stop containers that have been idle
+	IdleCPUPct  float64 `toml:"idle_cpu_pct"`
+	IdleMinutes int     `toml:"idle_minutes"`
+	// shell: run an arbitrary command
+	Command  string `toml:"command"`
+	TimeoutS int    `toml:"timeout_s"`
+	// email: send an alert with custom subject (supports {value} and {metric} placeholders)
+	Subject string `toml:"subject"`
+	// http_webhook: POST/GET to a URL
+	URL    string `toml:"url"`
+	Method string `toml:"method"` // default "POST"
+	Body   string `toml:"body"`
 }
 
 type GeneralConfig struct {
@@ -23,6 +58,30 @@ type GeneralConfig struct {
 	LogDir          string `toml:"log_dir"`
 	DBPath          string `toml:"db_path"`
 	TopProcessesN   int    `toml:"top_processes_n"`
+}
+
+// TimeWindow defines a time range when automated actions are allowed.
+type TimeWindow struct {
+	Days  []string `toml:"days"`  // ["mon","tue","wed","thu","fri","sat","sun"] or ["*"]
+	Start string   `toml:"start"` // "07:00"
+	End   string   `toml:"end"`   // "22:00"
+}
+
+type ScheduleConfig struct {
+	Enabled  bool         `toml:"enabled"`
+	Timezone string       `toml:"timezone"` // e.g. "Europe/Paris"
+	Windows  []TimeWindow `toml:"windows"`
+}
+
+// CollectionConfig defines how often each collector runs.
+type CollectionConfig struct {
+	RAMIntervalS     int `toml:"ram_interval_s"`
+	CPUIntervalS     int `toml:"cpu_interval_s"`
+	NetworkIntervalS int `toml:"network_interval_s"`
+	DockerIntervalS  int `toml:"docker_interval_s"`
+	DiskIntervalS    int `toml:"disk_interval_s"`
+	ProcessIntervalS int `toml:"process_interval_s"`
+	SystemIntervalS  int `toml:"system_interval_s"`
 }
 
 type ThresholdConfig struct {
@@ -62,6 +121,14 @@ type DiskWalkConfig struct {
 	Paths    []string `toml:"paths"`
 	MaxDepth int      `toml:"max_depth"`
 	TopDirsN int      `toml:"top_dirs_n"`
+}
+
+// DBConfig controls data retention.
+type DBConfig struct {
+	RawTTLHours    int `toml:"raw_ttl_hours"`    // default 48
+	HourlyTTLDays  int `toml:"hourly_ttl_days"`  // default 90
+	WeeklyTTLWeeks int `toml:"weekly_ttl_weeks"` // default 52
+	MaxSizeMB      int `toml:"max_size_mb"`      // alert threshold, default 500
 }
 
 type WebConfig struct {
@@ -181,5 +248,58 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Web.Password == "" {
 		cfg.Web.Password = "changeme"
+	}
+	// Schedule defaults
+	if cfg.Schedule.Timezone == "" {
+		cfg.Schedule.Timezone = "Europe/Paris"
+	}
+	// Collection interval defaults
+	if cfg.Collection.RAMIntervalS == 0 {
+		cfg.Collection.RAMIntervalS = 5
+	}
+	if cfg.Collection.CPUIntervalS == 0 {
+		cfg.Collection.CPUIntervalS = 5
+	}
+	if cfg.Collection.NetworkIntervalS == 0 {
+		cfg.Collection.NetworkIntervalS = 5
+	}
+	if cfg.Collection.DockerIntervalS == 0 {
+		cfg.Collection.DockerIntervalS = 15
+	}
+	if cfg.Collection.DiskIntervalS == 0 {
+		cfg.Collection.DiskIntervalS = 60
+	}
+	if cfg.Collection.ProcessIntervalS == 0 {
+		cfg.Collection.ProcessIntervalS = 30
+	}
+	if cfg.Collection.SystemIntervalS == 0 {
+		cfg.Collection.SystemIntervalS = 30
+	}
+	// Database TTL defaults
+	if cfg.Database.RawTTLHours == 0 {
+		cfg.Database.RawTTLHours = 48
+	}
+	if cfg.Database.HourlyTTLDays == 0 {
+		cfg.Database.HourlyTTLDays = 90
+	}
+	if cfg.Database.WeeklyTTLWeeks == 0 {
+		cfg.Database.WeeklyTTLWeeks = 52
+	}
+	if cfg.Database.MaxSizeMB == 0 {
+		cfg.Database.MaxSizeMB = 500
+	}
+	// Cap defaults
+	for i := range cfg.Caps {
+		if cfg.Caps[i].CooldownMinutes == 0 {
+			cfg.Caps[i].CooldownMinutes = 30
+		}
+		for j := range cfg.Caps[i].Actions {
+			if cfg.Caps[i].Actions[j].TimeoutS == 0 {
+				cfg.Caps[i].Actions[j].TimeoutS = 30
+			}
+			if cfg.Caps[i].Actions[j].Method == "" {
+				cfg.Caps[i].Actions[j].Method = "POST"
+			}
+		}
 	}
 }

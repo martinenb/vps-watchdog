@@ -3,7 +3,7 @@ set -euo pipefail
 
 # VPS Watchdog install script
 
-MIN_GO_VERSION="1.21"
+MIN_GO_VERSION="1.22"
 
 check_go_version() {
     if ! command -v go &>/dev/null; then
@@ -24,7 +24,6 @@ check_go_version() {
 }
 
 install_go() {
-    echo "Installing Go ${MIN_GO_VERSION}..."
     local arch
     arch=$(uname -m)
     local goarch
@@ -33,7 +32,16 @@ install_go() {
         aarch64|arm64) goarch="arm64" ;;
         *) echo "Unsupported architecture: $arch"; exit 1 ;;
     esac
-    local tarball="go${MIN_GO_VERSION}.linux-${goarch}.tar.gz"
+
+    # Fetch latest stable Go version dynamically
+    echo "Fetching latest Go version..."
+    local goversion
+    goversion=$(curl -fsSL "https://go.dev/VERSION?m=text" 2>/dev/null | head -1)
+    if [ -z "$goversion" ]; then
+        goversion="go1.23.4"  # fallback
+    fi
+    echo "Installing ${goversion}..."
+    local tarball="${goversion}.linux-${goarch}.tar.gz"
     local url="https://go.dev/dl/${tarball}"
     echo "Downloading $url ..."
     curl -fsSL "$url" -o "/tmp/${tarball}"

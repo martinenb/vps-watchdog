@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"vps-watchdog/internal/collector"
+	"vps-watchdog/internal/db"
 )
 
 // AlertData holds data for an immediate alert email.
@@ -37,7 +37,7 @@ type WeeklyData struct {
 	AvgCPU       float64
 	MaxCPU       float64
 	TotalActions int
-	ActionList   []collector.ActionRecord
+	ActionList   []db.ActionRecord
 	WeeklyStats  []WeekStat
 }
 
