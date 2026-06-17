@@ -68,8 +68,8 @@ CREATE TABLE IF NOT EXISTS metrics_hourly (
     max_val  REAL NOT NULL,
     avg_val  REAL NOT NULL,
     p95_val  REAL NOT NULL,
-    tags     TEXT,
-    UNIQUE(hour_ts, name, COALESCE(tags,''))
+    tags     TEXT NOT NULL DEFAULT '',
+    UNIQUE(hour_ts, name, tags)
 );
 CREATE INDEX IF NOT EXISTS idx_hourly_ts_name ON metrics_hourly(hour_ts, name);
 
@@ -365,9 +365,9 @@ func (d *DB) RollupHour(hourTS int64) error {
 		p95 := computeP95(vals)
 
 		_, err = tx.Exec(`
-			INSERT INTO metrics_hourly(hour_ts, category, name, min_val, max_val, avg_val, p95_val)
-			VALUES(?,?,?,?,?,?,?)
-			ON CONFLICT(hour_ts, name, COALESCE(tags,'')) DO UPDATE SET
+			INSERT INTO metrics_hourly(hour_ts, category, name, min_val, max_val, avg_val, p95_val, tags)
+			VALUES(?,?,?,?,?,?,?,'')
+			ON CONFLICT(hour_ts, name, tags) DO UPDATE SET
 				min_val=excluded.min_val, max_val=excluded.max_val,
 				avg_val=excluded.avg_val, p95_val=excluded.p95_val`,
 			hourTS, nc.category, nc.name, minV, maxV, avgV, p95,
